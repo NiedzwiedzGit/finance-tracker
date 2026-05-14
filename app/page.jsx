@@ -1,3 +1,4 @@
+"use client";
 import { useState, useEffect } from "react";
 
 const TAX_2026 = {
