@@ -134,7 +134,10 @@ const GOAL_ICONS = ["🏠","🚗","✈️","💻","📱","🎓","💍","🏖️"
 
 const fmt = (n) => new Intl.NumberFormat("pl-PL",{style:"currency",currency:"PLN",minimumFractionDigits:0,maximumFractionDigits:0}).format(n);
 const fmtDec = (n) => new Intl.NumberFormat("pl-PL",{style:"currency",currency:"PLN",minimumFractionDigits:2}).format(n);
-const load = (key, def) => { try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : def; } catch { return def; } };
+const load = (key, def) => {
+  if (typeof window === "undefined") return def;
+  try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : def; } catch { return def; }
+};
 const save = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
 const monthKey = (y, m) => `${y}-${String(m).padStart(2,"0")}`;
 const getCat = (type, id) => (type==="income"?CAT_INCOME:CAT_EXPENSE).find(c=>c.id===id)||{label:id,icon:"•"};
