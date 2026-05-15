@@ -54,6 +54,7 @@ export function generatePassword(length = 20) {
 
 // Pobiera datę ostatniego backupu
 export function getLastBackupDate() {
+  if (typeof window === "undefined") return null;
   return localStorage.getItem("fin3_last_backup");
 }
 
