@@ -709,12 +709,127 @@ export default function App() {
           </div>
         )}
 
-        {/* RECURRING, GOALS — Skróty */}
-        {(tab==="recurring"||tab==="goals") && (
+        {/* RECURRING */}
+        {tab==="recurring" && (
           <div style={{padding:isMobile?"56px 18px":"40px",maxWidth:1200,margin:"0 auto"}}>
-            <div style={{fontSize:isMobile?18:24,fontWeight:700,marginBottom:20}}>{tab==="recurring"?"Stałe wydatki":"Cele oszczędnościowe"}</div>
-            <div style={{textAlign:"center",padding:"60px 20px",color:"#44445a"}}>
-              Ta sekcja będzie dostępna — w pracy 🚀
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,marginBottom:18}}>
+              <div style={{fontSize:isMobile?18:24,fontWeight:700}}>Stałe wydatki</div>
+              <button
+                onClick={()=>{
+                  setEditTarget(null);
+                  setRecurForm({label:"",amount:"",category:"bills",icon:"📄",startYear:selYear,startMonth:selMonth});
+                  setModal("addRecur");
+                }}
+                style={{background:"linear-gradient(135deg,#2dd4bf,#14b8a6)",color:"#fff",borderRadius:14,padding:"10px 16px",fontSize:13,fontWeight:700,whiteSpace:"nowrap"}}
+              >
+                + Dodaj
+              </button>
+            </div>
+
+            <div className="card" style={{padding:isMobile?"14px":"18px",marginBottom:14}}>
+              <div style={{fontSize:11,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>Miesięczny koszt stały</div>
+              <div style={{fontSize:isMobile?20:24,fontWeight:800,color:"#f87171",fontFamily:"monospace"}}>
+                {fmt(recurring.reduce((sum, r) => sum + r.amount, 0))}
+              </div>
+            </div>
+
+            <div style={{background:isMobile?"none":"rgba(255,255,255,.02)",borderRadius:isMobile?0:14,padding:isMobile?0:18}}>
+              {recurring.length===0 ? (
+                <div style={{textAlign:"center",padding:"42px 0",color:"#2a2a40"}}>
+                  <div style={{fontSize:36,marginBottom:8}}>🔄</div>
+                  <div>Brak stałych wydatków</div>
+                </div>
+              ) : recurring
+                .slice()
+                .sort((a,b)=>a.startYear===b.startYear?a.startMonth-b.startMonth:a.startYear-b.startYear)
+                .map(r=>(
+                  <div key={r.id} className="row" onClick={()=>openEditRecur(r)} style={{cursor:"pointer",padding:isMobile?"13px 0":"16px 0"}}>
+                    <div style={{width:42,height:42,borderRadius:13,background:"rgba(45,212,191,.12)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{r.icon||"📄"}</div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:isMobile?13:15,fontWeight:600,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <span>{r.label}</span>
+                        <span className="pill bg-blue">STAŁY</span>
+                      </div>
+                      <div style={{fontSize:11,color:"#44445a"}}>od {MONTHS_FULL[r.startMonth]} {r.startYear}</div>
+                    </div>
+                    <div style={{fontSize:isMobile?14:15,fontWeight:700,color:"#f87171",fontFamily:"monospace",marginRight:8}}>-{fmt(r.amount)}</div>
+                    <button
+                      onClick={ev=>{ev.stopPropagation();deleteRecur(r.id);}}
+                      style={{width:26,height:26,borderRadius:8,background:"rgba(248,113,113,.1)",color:"#f87171",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+
+        {/* GOALS */}
+        {tab==="goals" && (
+          <div style={{padding:isMobile?"56px 18px":"40px",maxWidth:1200,margin:"0 auto"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,marginBottom:18}}>
+              <div style={{fontSize:isMobile?18:24,fontWeight:700}}>Cele oszczędnościowe</div>
+              <button
+                onClick={()=>{
+                  setEditTarget(null);
+                  setGoalForm({name:"",icon:"🏠",target:"",saved:"",deadline:""});
+                  setModal("addGoal");
+                }}
+                style={{background:"linear-gradient(135deg,#f59e0b,#fbbf24)",color:"#000",borderRadius:14,padding:"10px 16px",fontSize:13,fontWeight:700,whiteSpace:"nowrap"}}
+              >
+                + Dodaj
+              </button>
+            </div>
+
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12}}>
+              {goals.length===0 && (
+                <div className="card" style={{gridColumn:isMobile?"1":"1 / -1",textAlign:"center",padding:"42px 20px",color:"#2a2a40"}}>
+                  <div style={{fontSize:36,marginBottom:8}}>🎯</div>
+                  <div>Brak celów oszczędnościowych</div>
+                </div>
+              )}
+
+              {goals.map(g=>{
+                const pct = Math.max(0, Math.min(100, (g.saved / g.target) * 100));
+                const left = Math.max(0, g.target - g.saved);
+                return (
+                  <div key={g.id} className="card" style={{padding:"16px"}}>
+                    <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:10,marginBottom:10}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
+                        <div style={{fontSize:26,lineHeight:1}}>{g.icon||"🎯"}</div>
+                        <div style={{minWidth:0}}>
+                          <div style={{fontSize:15,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{g.name}</div>
+                          <div style={{fontSize:11,color:"#44445a"}}>{fmt(g.saved)} / {fmt(g.target)}</div>
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:6,flexShrink:0}}>
+                        <button onClick={()=>openEditGoal(g)} style={{padding:"6px 9px",borderRadius:8,background:"rgba(125,211,252,.12)",color:"#7dd3fc",fontSize:11,fontWeight:700}}>Edytuj</button>
+                        <button onClick={()=>deleteGoal(g.id)} style={{padding:"6px 9px",borderRadius:8,background:"rgba(248,113,113,.1)",color:"#f87171",fontSize:11,fontWeight:700}}>Usuń</button>
+                      </div>
+                    </div>
+
+                    <div style={{height:9,background:"rgba(255,255,255,.06)",borderRadius:999,overflow:"hidden",marginBottom:8}}>
+                      <div style={{width:`${pct}%`,height:"100%",background:"linear-gradient(135deg,#4ade80,#22c55e)",borderRadius:999}}/>
+                    </div>
+
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:11,color:"#44445a",marginBottom:12}}>
+                      <span>{Math.round(pct)}% celu</span>
+                      <span>zostało: {fmt(left)}</span>
+                    </div>
+
+                    <button
+                      onClick={()=>{
+                        setSavingForm({goalId:String(g.id),amount:""});
+                        setModal("addSaving");
+                      }}
+                      style={{width:"100%",padding:"10px",borderRadius:10,background:"rgba(74,222,128,.1)",color:"#4ade80",fontSize:12,fontWeight:700}}
+                    >
+                      + Dodaj wpłatę
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -740,6 +855,7 @@ export default function App() {
             <div style={{fontSize:isMobile?16:18,fontWeight:700,marginBottom:18}}>
               {modal==="addTx"?(editTarget?"Edytuj":"Nowa transakcja")
               :modal==="addRecur"?(editTarget?"Edytuj":"Nowy stały wydatek")
+              :modal==="addSaving"?"Nowa wpłata"
               :"Nowy cel"}
             </div>
 
@@ -789,6 +905,20 @@ export default function App() {
                   <input type="number" inputMode="decimal" placeholder="Docelowo" value={goalForm.target} onChange={e=>setGoalForm(f=>({...f,target:e.target.value}))} style={{flex:1,fontSize:18,fontWeight:700,fontFamily:"monospace"}}/>
                 </div>
                 <button className="btn-primary" onClick={submitGoal} style={{background:"linear-gradient(135deg,#f59e0b,#fbbf24)",color:"#000"}}>{editTarget?"Zapisz":"Utwórz"}</button>
+              </>
+            )}
+
+            {modal==="addSaving" && (
+              <>
+                <select className="select-box" style={{marginBottom:12}} value={savingForm.goalId} onChange={e=>setSavingForm(f=>({...f,goalId:e.target.value}))}>
+                  <option value="">Wybierz cel...</option>
+                  {goals.map(g=><option key={g.id} value={String(g.id)}>{g.icon||"🎯"} {g.name}</option>)}
+                </select>
+                <div className="input-box" style={{marginBottom:16}}>
+                  <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
+                  <input type="number" inputMode="decimal" placeholder="Kwota wpłaty" value={savingForm.amount} onChange={e=>setSavingForm(f=>({...f,amount:e.target.value}))} style={{flex:1,fontSize:18,fontWeight:700,fontFamily:"monospace"}}/>
+                </div>
+                <button className="btn-primary" onClick={submitSaving} style={{background:"linear-gradient(135deg,#4ade80,#22c55e)",color:"#04110a"}}>Dodaj wpłatę</button>
               </>
             )}
           </div>
