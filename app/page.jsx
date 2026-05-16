@@ -156,7 +156,7 @@ export default function App() {
   const [txForm, setTxForm] = useState({type:"expense",amount:"",category:"food",note:"",year:now.getFullYear(),month:now.getMonth(),reverseCharge:false,inputMode:"brutto"});
   const [recurForm, setRecurForm] = useState({label:"",amount:"",category:"bills",icon:"📄",startYear:now.getFullYear(),startMonth:now.getMonth()});
   const [goalForm, setGoalForm] = useState({name:"",icon:"🏠",target:"",saved:"",deadline:""});
-  const [savingForm, setSavingForm] = useState({goalId:"",amount:""});
+  const [savingForm, setSavingForm] = useState({goalId:"",amount:"",sourceIncome:"other_in"});
   const [backupPassword, setBackupPassword] = useState(() => load("fin3_backup_pwd", ""));
   const [backupStatus, setBackupStatus] = useState("");
   const [backupLoading, setBackupLoading] = useState(false);
@@ -397,8 +397,24 @@ export default function App() {
   const submitSaving = () => {
     const amt=parseFloat(String(savingForm.amount).replace(",","."));
     if(!amt||amt<=0) return;
-    setGoals(prev=>prev.map(g=>g.id===Number(savingForm.goalId)?{...g,saved:g.saved+amt,history:[...(g.history||[]),{date:new Date().toISOString(),amount:amt}]}:g));
-    setModal(null); setSavingForm({goalId:"",amount:""});
+    setGoals(prev=>prev.map(g=>g.id===Number(savingForm.goalId)?{...g,saved:g.saved+amt,history:[...(g.history||[]),{date:new Date().toISOString(),amount:amt,source:savingForm.sourceIncome}]}:g));
+    setModal(null); setSavingForm({goalId:"",amount:"",sourceIncome:"other_in"});
+  };
+
+  const getAverageMonthlyIncome = () => {
+    let totalIncome = 0, monthsWithIncome = 0;
+    for (let m = Math.max(0, now.getMonth() - 2); m <= now.getMonth(); m++) {
+      const s = computeMonthSummary(now.getFullYear(), m);
+      if (s.realIncome > 0) { totalIncome += s.realIncome; monthsWithIncome++; }
+    }
+    return monthsWithIncome > 0 ? totalIncome / monthsWithIncome : 0;
+  };
+
+  const estimateMonthsToGoal = (goal) => {
+    const left = Math.max(0, goal.target - goal.saved);
+    const avgIncome = getAverageMonthlyIncome();
+    if (avgIncome <= 0 || left <= 0) return null;
+    return Math.ceil((left / avgIncome) * 100) / 100;
   };
   const deleteGoal = (id) => setGoals(prev=>prev.filter(g=>g.id!==id));
 
@@ -822,9 +838,15 @@ export default function App() {
                       <span>zostało: {fmt(left)}</span>
                     </div>
 
+                    {left > 0 && estimateMonthsToGoal(g) && (
+                      <div style={{padding:"8px 10px",background:"rgba(167,139,250,.08)",borderRadius:8,fontSize:10,color:"#a78bfa",marginBottom:12,textAlign:"center"}}>
+                        🕐 ~{estimateMonthsToGoal(g) < 1 ? Math.round(estimateMonthsToGoal(g) * 4) + " tygodni" : estimateMonthsToGoal(g).toFixed(1) + " miesięcy"}
+                      </div>
+                    )}
+
                     <button
                       onClick={()=>{
-                        setSavingForm({goalId:String(g.id),amount:""});
+                        setSavingForm({goalId:String(g.id),amount:"",sourceIncome:"other_in"});
                         setModal("addSaving");
                       }}
                       style={{width:"100%",padding:"10px",borderRadius:10,background:"rgba(74,222,128,.1)",color:"#4ade80",fontSize:12,fontWeight:700}}
@@ -953,6 +975,14 @@ export default function App() {
                   <option value="">Wybierz cel...</option>
                   {goals.map(g=><option key={g.id} value={String(g.id)}>{g.icon||"🎯"} {g.name}</option>)}
                 </select>
+
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:12,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>Typ przychodu</div>
+                  <select className="select-box" value={savingForm.sourceIncome} onChange={e=>setSavingForm(f=>({...f,sourceIncome:e.target.value}))}>
+                    {CAT_INCOME.map(cat=><option key={cat.id} value={cat.id}>{cat.icon} {cat.label}</option>)}
+                  </select>
+                </div>
+
                 <div className="input-box" style={{marginBottom:16}}>
                   <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
                   <input type="number" inputMode="decimal" placeholder="Kwota wpłaty" value={savingForm.amount} onChange={e=>setSavingForm(f=>({...f,amount:e.target.value}))} style={{flex:1,fontSize:18,fontWeight:700,fontFamily:"monospace"}}/>
