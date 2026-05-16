@@ -914,6 +914,12 @@ export default function App() {
                 <div className="input-box" style={{marginBottom:20}}>
                   <input type="text" placeholder="Notatka (opcjonalnie)" value={txForm.note} onChange={e=>setTxForm(f=>({...f,note:e.target.value}))} style={{flex:1,fontSize:14}}/>
                 </div>
+
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,padding:"10px 12px",background:"rgba(34,211,238,.08)",borderRadius:10}}>
+                  <input type="checkbox" checked={txForm.reverseCharge} onChange={e=>setTxForm(f=>({...f,reverseCharge:e.target.checked}))} style={{width:18,height:18,cursor:"pointer"}}/>
+                  <label style={{fontSize:13,color:"#22d3ee",cursor:"pointer",flex:1}}>Reverse Charge (RC)</label>
+                </div>
+
                 <button className="btn-primary" onClick={submitTx} style={{background:txForm.type==="income"?"linear-gradient(135deg,#4ade80,#22c55e)":"linear-gradient(135deg,#f87171,#ef4444)"}}>
                   {editTarget?"Zapisz":"Dodaj"}
                 </button>
