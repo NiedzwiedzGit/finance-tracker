@@ -357,10 +357,10 @@ export default function App() {
       if(r) bruttoAmt = cat.taxType==="uop" ? r.brutto : r.przychod;
     }
     if(editTarget) {
-      setTxData(prev=>({...prev,[k]:(prev[k]||[]).map(e=>e.id===editTarget.id?{...e,amount:bruttoAmt,category:txForm.category,note:txForm.note,type:txForm.type,reverseCharge:txForm.reverseCharge}:e)}));
+      setTxData(prev=>({...prev,[k]:(prev[k]||[]).map(e=>e.id===editTarget.id?{...e,amount:bruttoAmt,category:txForm.category,note:txForm.note,type:txForm.type,reverseCharge:txForm.reverseCharge,inputMode:txForm.type==="income"?txForm.inputMode:undefined}:e)}));
     } else {
-      const entry={id:Date.now(),type:txForm.type,amount:bruttoAmt,category:txForm.category,note:txForm.note,date:new Date().toISOString(),reverseCharge:txForm.reverseCharge};
-      setTxData(prev=>({...prev,[k]:[...(prev[k]||[]),entry]}));
+    const submittedEntry = {id:Date.now(),type:txForm.type,amount:bruttoAmt,category:txForm.category,note:txForm.note,date:new Date().toISOString(),reverseCharge:txForm.reverseCharge,inputMode:txForm.type==="income"?txForm.inputMode:undefined};
+      setTxData(prev=>({...prev,[k]:[...(prev[k]||[]),submittedEntry]}));
     }
     setModal(null); setEditTarget(null);
   };
@@ -421,7 +421,7 @@ export default function App() {
   const openEditTx = (entry) => {
     if(entry.isRecurring) return;
     setEditTarget(entry);
-    setTxForm({type:entry.type,amount:String(entry.amount),category:entry.category,note:entry.note||"",year:selYear,month:selMonth,reverseCharge:entry.reverseCharge||false,inputMode:"brutto"});
+    setTxForm({type:entry.type,amount:String(entry.amount),category:entry.category,note:entry.note||"",year:selYear,month:selMonth,reverseCharge:entry.reverseCharge||false,inputMode:entry.inputMode||"brutto"});
     setModal("addTx");
   };
   const openEditRecur = (r) => { setEditTarget(r); setRecurForm({label:r.label,amount:String(r.amount),category:r.category,icon:r.icon,startYear:r.startYear,startMonth:r.startMonth}); setModal("addRecur"); };
@@ -606,7 +606,7 @@ export default function App() {
                     <div style={{fontSize:isMobile?13:15,fontWeight:500,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                       {cat.label}
                       {e.isRecurring&&<span className="pill bg-blue">STAŁY</span>}
-                      {cat.isTaxed&&<span className="pill bg-violet">BRUTTO</span>}
+                      {cat.isTaxed&&<span className="pill bg-violet">{e.inputMode==="netto"?"NETTO":"BRUTTO"}</span>}
                       {e.reverseCharge&&<span className="pill" style={{fontSize:9,background:"rgba(34,211,238,.12)",color:"#22d3ee"}}>RC</span>}
                     </div>
                     {e.note&&<div style={{fontSize:11,color:"#44445a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.note}</div>}
@@ -899,6 +899,16 @@ export default function App() {
                   </select>
                 </div>
 
+                {txForm.type==="income" && CAT_INCOME.find(c=>c.id===txForm.category)?.isTaxed && (
+                  <div style={{marginBottom:14}}>
+                    <div style={{fontSize:12,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>Typ kwoty</div>
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={()=>setTxForm(f=>({...f,inputMode:"brutto"}))} style={{flex:1,padding:"10px 8px",borderRadius:10,background:txForm.inputMode==="brutto"?"rgba(255,193,7,.15)":"rgba(255,255,255,.04)",color:txForm.inputMode==="brutto"?"#ffc107":"#44445a",fontSize:12,fontWeight:600,border:txForm.inputMode==="brutto"?"1px solid rgba(255,193,7,.3)":"1px solid rgba(255,255,255,.1)",cursor:"pointer"}}>💰 Brutto</button>
+                      <button onClick={()=>setTxForm(f=>({...f,inputMode:"netto"}))} style={{flex:1,padding:"10px 8px",borderRadius:10,background:txForm.inputMode==="netto"?"rgba(76,175,80,.15)":"rgba(255,255,255,.04)",color:txForm.inputMode==="netto"?"#4ade80":"#44445a",fontSize:12,fontWeight:600,border:txForm.inputMode==="netto"?"1px solid rgba(76,175,80,.3)":"1px solid rgba(255,255,255,.1)",cursor:"pointer"}}>✓ Netto</button>
+                    </div>
+                  </div>
+                )}
+
                 {!editTarget&&(<div style={{display:"flex",gap:8,marginBottom:14}}>
                   <select className="select-box" style={{flex:2}} value={txForm.month} onChange={e=>setTxForm(f=>({...f,month:Number(e.target.value)}))}>
                     {MONTHS_FULL.map((m,i)=><option key={i} value={i}>{m}</option>)}
@@ -911,14 +921,50 @@ export default function App() {
                   <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
                   <input type="number" inputMode="decimal" placeholder="0,00" value={txForm.amount} onChange={e=>setTxForm(f=>({...f,amount:e.target.value}))} style={{flex:1,fontSize:isMobile?20:26,fontWeight:700,fontFamily:"monospace"}}/>
                 </div>
+
+                {txForm.type==="income" && txForm.amount && CAT_INCOME.find(c=>c.id===txForm.category)?.isTaxed && (
+                  <div style={{marginBottom:14,padding:"10px 12px",background:"rgba(255,193,7,.06)",borderRadius:10,fontSize:12,color:"#ffc107"}}>
+                    {txForm.inputMode==="brutto"
+                      ? `Wpisane: Brutto | Po opodatkowaniu: ~${(() => {
+                          const ytd = computeYtdContext(txForm.year,txForm.month);
+                          const cat = getCat("income",txForm.category);
+                          const amt = parseFloat(String(txForm.amount).replace(",","."));
+                          if (cat.taxType==="uop") {
+                            const r = calcUoP(amt, ytd.uopPitBase);
+                            return r ? fmt(r.netto) : "?";
+                          } else if(cat.taxType==="ryczalt12") {
+                            const r = calcRyczalt(amt, ytd.ryczaltPrzychod);
+                            return r ? fmt(r.netto) : "?";
+                          }
+                          return "?";
+                        })()}`
+                      : `Wpisane: Netto | Brutto do zarejestrowania: ~${(() => {
+                          const ytd = computeYtdContext(txForm.year,txForm.month);
+                          const cat = getCat("income",txForm.category);
+                          const amt = parseFloat(String(txForm.amount).replace(",","."));
+                          if (cat.taxType==="uop") {
+                            const r = calcUoPFromNetto(amt, ytd.uopPitBase);
+                            return r ? fmt(r.brutto) : "?";
+                          } else if(cat.taxType==="ryczalt12") {
+                            const r = calcRyczaltFromNetto(amt, ytd.ryczaltPrzychod);
+                            return r ? fmt(r.przychod) : "?";
+                          }
+                          return "?";
+                        })()}`
+                    }
+                  </div>
+                )}
+
                 <div className="input-box" style={{marginBottom:20}}>
                   <input type="text" placeholder="Notatka (opcjonalnie)" value={txForm.note} onChange={e=>setTxForm(f=>({...f,note:e.target.value}))} style={{flex:1,fontSize:14}}/>
                 </div>
 
-                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,padding:"10px 12px",background:"rgba(34,211,238,.08)",borderRadius:10}}>
-                  <input type="checkbox" checked={txForm.reverseCharge} onChange={e=>setTxForm(f=>({...f,reverseCharge:e.target.checked}))} style={{width:18,height:18,cursor:"pointer"}}/>
-                  <label style={{fontSize:13,color:"#22d3ee",cursor:"pointer",flex:1}}>Reverse Charge (RC)</label>
-                </div>
+                {(txForm.type==="expense" || (txForm.type==="income" && txForm.category==="jdg")) && (
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,padding:"10px 12px",background:"rgba(34,211,238,.08)",borderRadius:10}}>
+                    <input type="checkbox" checked={txForm.reverseCharge} onChange={e=>setTxForm(f=>({...f,reverseCharge:e.target.checked}))} style={{width:18,height:18,cursor:"pointer"}}/>
+                    <label style={{fontSize:13,color:"#22d3ee",cursor:"pointer",flex:1}}>Reverse Charge (RC)</label>
+                  </div>
+                )}
 
                 <button className="btn-primary" onClick={submitTx} style={{background:txForm.type==="income"?"linear-gradient(135deg,#4ade80,#22c55e)":"linear-gradient(135deg,#f87171,#ef4444)"}}>
                   {editTarget?"Zapisz":"Dodaj"}
