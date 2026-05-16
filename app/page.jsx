@@ -143,27 +143,8 @@ const monthKey = (y, m) => `${y}-${String(m).padStart(2,"0")}`;
 const getCat = (type, id) => (type==="income"?CAT_INCOME:CAT_EXPENSE).find(c=>c.id===id)||{label:id,icon:"•"};
 
 export default function App() {
-  useEffect(() => {
-  // Rejestracja Service Workera
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/sw.js").then((reg) => {
-      console.log("Service Worker zarejestrowany");
-      // Uruchomienie timera
-      reg.active?.postMessage({ type: "START_BACKUP_TIMER" });
-    }).catch(err => console.error("SW error:", err));
-  }
-
-  // Nasłuchiwanie na wiadomości od Service Workera
-  navigator.serviceWorker?.addEventListener("message", (event) => {
-    if (event.data.type === "BACKUP_COMPLETED") {
-      console.log("✅ Auto-backup gotowy!");
-      setBackupStatus(event.data.message);
-      // Opcjonalnie: auto-pobierz plik
-      downloadEncryptedBackup(event.data.encrypted, event.data.filename);
-    }
-  });
-}, []);
   const now = new Date();
+  const [isMobile, setIsMobile] = useState(false);
   const [tab, setTab] = useState("dashboard");
   const [selYear, setSelYear] = useState(now.getFullYear());
   const [selMonth, setSelMonth] = useState(now.getMonth());
@@ -176,8 +157,6 @@ export default function App() {
   const [recurForm, setRecurForm] = useState({label:"",amount:"",category:"bills",icon:"📄",startYear:now.getFullYear(),startMonth:now.getMonth()});
   const [goalForm, setGoalForm] = useState({name:"",icon:"🏠",target:"",saved:"",deadline:""});
   const [savingForm, setSavingForm] = useState({goalId:"",amount:""});
-
-  // Backup state
   const [backupPassword, setBackupPassword] = useState(() => load("fin3_backup_pwd", ""));
   const [backupStatus, setBackupStatus] = useState("");
   const [backupLoading, setBackupLoading] = useState(false);
@@ -188,15 +167,21 @@ export default function App() {
   const [restorePassword, setRestorePassword] = useState("");
   const fileInputRef = useRef(null);
 
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   useEffect(() => save("fin3_tx", txData), [txData]);
   useEffect(() => save("fin3_recur", recurring), [recurring]);
   useEffect(() => save("fin3_goals", goals), [goals]);
   useEffect(() => save("fin3_backup_pwd", backupPassword), [backupPassword]);
 
-  // Auto-backup check co tydzien
   useEffect(() => {
     if (backupPassword && isBackupDue()) {
-      setBackupStatus("⚠️ Czas na backup! Kliknij 'Backup teraz'.");
+      setBackupStatus("⚠️ Czas na backup!");
     }
   }, [backupPassword]);
 
@@ -204,7 +189,7 @@ export default function App() {
 
   const handleBackup = async () => {
     if (!backupPassword) {
-      setBackupStatus("❌ Ustaw hasło backup najpierw!");
+      setBackupStatus("❌ Ustaw haslo backup!");
       return;
     }
     setBackupLoading(true);
@@ -221,33 +206,33 @@ export default function App() {
       URL.revokeObjectURL(url);
       setLastBackupDate();
       setLastBackup(new Date().toISOString());
-      setBackupStatus("✅ Backup pobrany! Zapisz plik w Google Drive / iCloud.");
+      setBackupStatus("✅ Backup pobrany!");
     } catch (e) {
-      setBackupStatus("❌ Blad podczas backupu: " + e.message);
+      setBackupStatus("❌ Blad: " + e.message);
     }
     setBackupLoading(false);
   };
 
   const handleRestore = async () => {
     if (!restoreText || !restorePassword) {
-      setBackupStatus("❌ Wklej dane backupu i podaj haslo.");
+      setBackupStatus("❌ Wklej dane i haslo");
       return;
     }
     setBackupLoading(true);
     setBackupStatus("");
     try {
       const result = await decryptBackup(restoreText.trim(), restorePassword);
-      if (!result || !result.data) throw new Error("Niepoprawne dane backupu");
+      if (!result || !result.data) throw new Error("Niepoprawne dane");
       const { txData: td, recurring: rc, goals: gl } = result.data;
       if (td) setTxData(td);
       if (rc) setRecurring(rc);
       if (gl) setGoals(gl);
-      setBackupStatus("✅ Dane przywrocone z backupu z " + new Date(result.timestamp).toLocaleDateString("pl-PL"));
+      setBackupStatus("✅ Dane przywrocone!");
       setShowRestoreInput(false);
       setRestoreText("");
       setRestorePassword("");
     } catch (e) {
-      setBackupStatus("❌ Blad: Niepoprawne haslo lub uszkodzony plik backupu.");
+      setBackupStatus("❌ Blad: Niepoprawne haslo");
     }
     setBackupLoading(false);
   };
@@ -267,7 +252,7 @@ export default function App() {
     const pwd = generatePassword(20);
     setBackupPassword(pwd);
     setShowPassword(true);
-    setBackupStatus("⚠️ Zapisz to haslo bezpiecznie — bez niego nie odszyfrujesz danych!");
+    setBackupStatus("⚠️ Zapisz to haslo!");
   };
 
   const getMonthEntries = (y, m) => {
@@ -354,7 +339,7 @@ export default function App() {
 
   const totalBalance = (() => {
     let total=0;
-    YEARS.forEach(y=>{for(let m=0;m<12;m++){const s=computeMonthSummary(y,m);total+=s.net;}});
+    [2024,2025,2026,2027].forEach(y=>{for(let m=0;m<12;m++){const s=computeMonthSummary(y,m);total+=s.net;}});
     return total;
   })();
 
@@ -426,12 +411,23 @@ export default function App() {
   const barMax = Math.max(...barData.flatMap(b=>[b.inc,b.exp]),1);
   const monthGrid = Array.from({length:12},(_,m)=>{ const s=computeMonthSummary(selYear,m); return{m,net:s.net,hasData:s.entries.length>0}; });
 
+  const sidebarItems = [
+    {id:"dashboard",icon:"◎",label:"Główna"},
+    {id:"month",icon:"≡",label:"Miesiąc"},
+    {id:"taxes",icon:"🧾",label:"Podatki"},
+    {id:"recurring",icon:"🔄",label:"Stałe"},
+    {id:"goals",icon:"🎯",label:"Cele"},
+    {id:"backup",icon:"🔐",label:"Backup"},
+  ];
+
   return (
-    <div style={{minHeight:"100vh",background:"#08080e",fontFamily:"Sora, sans-serif",color:"#eeeaf4",maxWidth:430,margin:"0 auto",position:"relative",overflowX:"hidden"}}>
+    <div style={{minHeight:"100vh",background:"#08080e",fontFamily:"Sora, sans-serif",color:"#eeeaf4",display:"flex"}}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&display=swap');
         *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-        ::-webkit-scrollbar{display:none;}
+        ::-webkit-scrollbar{width:8px;}
+        ::-webkit-scrollbar-track{background:rgba(255,255,255,.05);}
+        ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:4px;}
         input,textarea,select{outline:none;border:none;background:none;font-family:inherit;color:#eeeaf4;}
         button{border:none;cursor:pointer;font-family:inherit;}
         .card{background:rgba(255,255,255,0.038);border:1px solid rgba(255,255,255,0.07);border-radius:20px;}
@@ -442,555 +438,359 @@ export default function App() {
         .bg-blue{background:rgba(125,211,252,.1);color:#7dd3fc;}
         .bg-violet{background:rgba(167,139,250,.12);color:#a78bfa;}
         .bg-amber{background:rgba(251,191,36,.12);color:#fbbf24;}
-        .tab{flex:1;padding:10px 6px;background:none;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:#44445a;border-radius:10px;transition:all .2s;}
-        .tab.on{background:rgba(255,255,255,.07);color:#eeeaf4;}
-        .nav-btn{display:flex;flex-direction:column;align-items:center;gap:3px;background:none;transition:all .2s;padding:4px 6px;}
-        .cat-chip{border-radius:12px;padding:8px 12px;background:rgba(255,255,255,.04);border:1.5px solid transparent;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;color:#666680;min-width:66px;}
-        .cat-chip.sel-exp{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171;}
-        .cat-chip.sel-inc{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80;}
-        .icon-chip{width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,.05);border:1.5px solid transparent;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;font-size:20px;}
-        .icon-chip.sel{border-color:#7dd3fc;background:rgba(125,211,252,.1);}
-        .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);z-index:200;display:flex;align-items:flex-end;justify-content:center;}
-        .modal{background:#111119;border-radius:28px 28px 0 0;width:100%;max-width:430px;padding:24px 22px 40px;max-height:90vh;overflow-y:auto;border-top:1px solid rgba(255,255,255,.08);}
-        .drag-handle{width:40px;height:4px;background:rgba(255,255,255,.15);border-radius:2px;margin:0 auto 20px;}
         .input-box{background:rgba(255,255,255,.05);border-radius:14px;padding:14px 16px;border:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:10px;}
         .input-box input{flex:1;font-size:15px;}
         .select-box{background:rgba(255,255,255,.05);border-radius:14px;padding:14px 16px;border:1px solid rgba(255,255,255,.08);width:100%;color:#eeeaf4;font-size:14px;-webkit-appearance:none;appearance:none;}
         .btn-primary{width:100%;padding:17px;border-radius:16px;font-size:15px;font-weight:700;letter-spacing:.02em;color:#fff;transition:all .15s;}
-        .progress-bar{height:8px;border-radius:100px;background:rgba(255,255,255,.07);overflow:hidden;}
-        .progress-fill{height:100%;border-radius:100px;transition:width .5s ease;}
-        @keyframes up{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
-        .up{animation:up .3s ease both;}
-        @keyframes pop{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}
-        .pop{animation:pop .2s ease both;}
-        .breakdown-grid{display:grid;grid-template-columns:1fr auto;gap:8px 14px;}
-        .breakdown-grid > *:nth-child(odd){color:#888899;font-size:12px;}
-        .breakdown-grid > *:nth-child(even){font-family:monospace;font-size:13px;font-weight:600;text-align:right;}
+        .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);z-index:200;display:flex;align-items:center;justify-content:center;}
+        .modal{background:#111119;border-radius:20px;width:95%;max-width:500px;max-height:90vh;overflow-y:auto;padding:24px;border:1px solid rgba(255,255,255,.08);}
+        @media(max-width:767px){
+          .modal{width:100%;border-radius:28px 28px 0 0;position:fixed;bottom:0;max-height:90vh;}
+        }
+        .drag-handle{width:40px;height:4px;background:rgba(255,255,255,.15);border-radius:2px;margin:0 auto 20px;}
       `}</style>
 
-      <div style={{position:"fixed",top:-200,left:-100,width:500,height:500,background:"radial-gradient(ellipse,rgba(45,212,191,.07) 0%,transparent 65%)",pointerEvents:"none",zIndex:0}}/>
-      <div style={{position:"fixed",top:300,right:-150,width:400,height:400,background:"radial-gradient(ellipse,rgba(167,139,250,.05) 0%,transparent 65%)",pointerEvents:"none",zIndex:0}}/>
-
-      {/* DASHBOARD */}
-      {tab==="dashboard" && (
-        <div style={{padding:"0 0 110px",position:"relative",zIndex:1}}>
-          <div style={{padding:"56px 22px 0"}}>
-            <div style={{fontSize:11,color:"#44445a",letterSpacing:".1em",textTransform:"uppercase",marginBottom:6}}>Calkowite saldo</div>
-            <div className="pop" style={{fontSize:46,fontWeight:800,letterSpacing:"-0.04em",color:totalBalance>=0?"#eeeaf4":"#f87171",lineHeight:1}}>{fmt(totalBalance)}</div>
-            <div style={{marginTop:8,fontSize:12,color:"#44445a"}}>uwzglednia ZUS, zdrowotna, PIT i ryczalt</div>
-            {backupPassword && isBackupDue() && (
-              <div onClick={()=>setTab("backup")} style={{marginTop:12,padding:"10px 14px",background:"rgba(251,191,36,.08)",borderRadius:12,fontSize:12,color:"#fbbf24",display:"flex",alignItems:"center",gap:8,cursor:"pointer",border:"1px solid rgba(251,191,36,.2)"}}>
-                <span>⚠️</span><span>Czas na tygodniowy backup! Kliknij tutaj.</span>
-              </div>
-            )}
-          </div>
-
-          <div className="card" style={{margin:"24px 18px 0",padding:"18px",cursor:"pointer"}} onClick={()=>setTab("month")}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-              <span style={{fontSize:15,fontWeight:600}}>{MONTHS_FULL[now.getMonth()]} {now.getFullYear()}</span>
-              <span style={{fontSize:11,color:"#44445a",background:"rgba(255,255,255,.05)",borderRadius:8,padding:"4px 10px"}}>szczegoly →</span>
-            </div>
-            {(()=>{ const s=computeMonthSummary(now.getFullYear(),now.getMonth()); return (
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-                {[{label:"Na reke",val:s.realIncome,cls:"green"},{label:"Wydatki",val:s.expense,cls:"red"},{label:"Bilans",val:s.net,cls:s.net>=0?"blue":"red"}].map(x=>(
-                  <div key={x.label} style={{background:"rgba(0,0,0,.35)",borderRadius:14,padding:"11px 10px",textAlign:"center"}}>
-                    <div style={{fontSize:9,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:5}}>{x.label}</div>
-                    <div className={x.cls} style={{fontSize:13,fontWeight:700}}>{fmt(x.val)}</div>
-                  </div>
-                ))}
-              </div>
-            ); })()}
-          </div>
-
-          {forecast && forecast.total>0 && (
-            <div className="card" style={{margin:"14px 18px 0",padding:"16px 18px"}}>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                <span style={{fontSize:16}}>🔮</span>
-                <span style={{fontSize:13,fontWeight:600,color:"#a78bfa"}}>Prognoza – kolejny miesiac</span>
-              </div>
-              <div style={{fontSize:22,fontWeight:800,color:"#a78bfa",fontFamily:"monospace"}}>{fmt(forecast.total)}</div>
-              <div style={{fontSize:11,color:"#44445a",marginTop:4}}>szacowana zaliczka PIT + ryczalt</div>
-            </div>
-          )}
-
-          <div className="card" style={{margin:"14px 18px 0",padding:"18px"}}>
-            <div style={{fontSize:11,color:"#44445a",letterSpacing:".08em",textTransform:"uppercase",marginBottom:14}}>Ostatnie 6 miesiecy</div>
-            <div style={{display:"flex",alignItems:"flex-end",gap:5,height:72}}>
-              {barData.map((b,i)=>(
-                <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                  <div style={{width:"100%",display:"flex",gap:2,alignItems:"flex-end",height:56}}>
-                    <div style={{flex:1,background:"rgba(74,222,128,.35)",borderRadius:"3px 3px 0 0",height:`${(b.inc/barMax)*100}%`,minHeight:b.inc>0?2:0}}/>
-                    <div style={{flex:1,background:"rgba(248,113,113,.35)",borderRadius:"3px 3px 0 0",height:`${(b.exp/barMax)*100}%`,minHeight:b.exp>0?2:0}}/>
-                  </div>
-                  <div style={{fontSize:9,color:"#44445a"}}>{b.label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div style={{margin:"20px 18px 0"}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-              <div style={{fontSize:11,color:"#44445a",letterSpacing:".08em",textTransform:"uppercase"}}>Historia</div>
-              <div style={{display:"flex",gap:2}}>
-                {YEARS.map(y=><button key={y} onClick={()=>setSelYear(y)} style={{padding:"4px 8px",borderRadius:8,background:selYear===y?"rgba(125,211,252,.15)":"rgba(255,255,255,.04)",color:selYear===y?"#7dd3fc":"#44445a",fontSize:11,fontWeight:600}}>{y}</button>)}
-              </div>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
-              {monthGrid.map(({m,net,hasData})=>{ const isCur=m===now.getMonth()&&selYear===now.getFullYear(); return (
-                <div key={m} onClick={()=>{setSelMonth(m);setTab("month");}} style={{background:isCur?"rgba(125,211,252,.07)":"rgba(255,255,255,.03)",borderRadius:14,padding:"11px 8px",border:isCur?"1px solid rgba(125,211,252,.25)":"1px solid rgba(255,255,255,.05)",cursor:"pointer",textAlign:"center"}}>
-                  <div style={{fontSize:11,fontWeight:600,marginBottom:4,color:isCur?"#7dd3fc":"#eeeaf4"}}>{MONTHS_SHORT[m]}</div>
-                  {hasData?<div style={{fontSize:11,fontWeight:700,color:net>=0?"#4ade80":"#f87171"}}>{fmt(net)}</div>:<div style={{fontSize:11,color:"#2a2a40"}}>—</div>}
-                </div>
-              ); })}
-            </div>
+      {/* DESKTOP SIDEBAR */}
+      {!isMobile && (
+        <div style={{width:240,background:"rgba(0,0,0,.4)",borderRight:"1px solid rgba(255,255,255,.08)",padding:"24px 16px",position:"fixed",height:"100vh",overflow:"auto"}}>
+          <div style={{fontSize:20,fontWeight:800,marginBottom:32,color:"#eeeaf4"}}>💰 Finance</div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {sidebarItems.map(item=>(
+              <button key={item.id} onClick={()=>setTab(item.id)} style={{
+                padding:"14px 16px",borderRadius:12,background:tab===item.id?"rgba(125,211,252,.15)":"transparent",
+                border:tab===item.id?"1px solid rgba(125,211,252,.3)":"1px solid transparent",
+                color:tab===item.id?"#7dd3fc":"#888",fontSize:14,fontWeight:tab===item.id?600:500,
+                display:"flex",alignItems:"center",gap:10,transition:"all .2s",cursor:"pointer",textAlign:"left"
+              }}>
+                <span style={{fontSize:18}}>{item.icon}</span>{item.label}
+              </button>
+            ))}
           </div>
         </div>
       )}
 
-      {/* MONTH */}
-      {tab==="month" && (
-        <div style={{padding:"0 0 110px",position:"relative",zIndex:1}}>
-          <div style={{padding:"56px 18px 16px"}}>
+      {/* MAIN CONTENT */}
+      <div style={{flex:1,marginLeft:isMobile?0:240,paddingBottom:isMobile?110:0,position:"relative",minHeight:"100vh"}}>
+        
+        {/* DASHBOARD */}
+        {tab==="dashboard" && (
+          <div style={{padding:isMobile?"0 0 110px":"40px"}}>
+            <div style={{maxWidth:1200,margin:"0 auto"}}>
+              <div style={{marginBottom:32}}>
+                <div style={{fontSize:isMobile?11:14,color:"#44445a",letterSpacing:".1em",textTransform:"uppercase",marginBottom:8}}>Całkowite saldo</div>
+                <div style={{fontSize:isMobile?36:56,fontWeight:800,letterSpacing:"-0.04em",color:totalBalance>=0?"#eeeaf4":"#f87171",lineHeight:1}}>{fmt(totalBalance)}</div>
+                <div style={{marginTop:8,fontSize:isMobile?11:13,color:"#44445a"}}>uwzględnia ZUS, zdrowotną, PIT i ryczałt</div>
+              </div>
+
+              {backupPassword && isBackupDue() && (
+                <div onClick={()=>setTab("backup")} style={{marginBottom:20,padding:"14px 18px",background:"rgba(251,191,36,.08)",borderRadius:14,fontSize:isMobile?12:14,color:"#fbbf24",display:"flex",alignItems:"center",gap:8,cursor:"pointer",border:"1px solid rgba(251,191,36,.2)"}}>
+                  <span>⚠️</span><span>Czas na tygodniowy backup!</span>
+                </div>
+              )}
+
+              <div style={{display:isMobile?"block":"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginBottom:20}}>
+                {/* Current month card */}
+                <div className="card" style={{padding:"20px",cursor:"pointer"}} onClick={()=>setTab("month")}>
+                  <div style={{fontSize:isMobile?13:15,fontWeight:600,marginBottom:12}}>Bieżący miesiąc</div>
+                  {(()=>{ const s=computeMonthSummary(now.getFullYear(),now.getMonth()); return (
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                      {[{label:"Na rękę",val:s.realIncome,cls:"green"},{label:"Wydatki",val:s.expense,cls:"red"},{label:"Bilans",val:s.net,cls:s.net>=0?"blue":"red"}].map(x=>(
+                        <div key={x.label} style={{background:"rgba(0,0,0,.35)",borderRadius:12,padding:"10px 8px",textAlign:"center"}}>
+                          <div style={{fontSize:isMobile?8:9,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:4}}>{x.label}</div>
+                          <div className={x.cls} style={{fontSize:isMobile?12:14,fontWeight:700}}>{fmt(x.val)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ); })()}
+                </div>
+
+                {/* Forecast */}
+                {forecast && forecast.total>0 && (
+                  <div className="card" style={{padding:"20px"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                      <span style={{fontSize:isMobile?16:20}}>🔮</span>
+                      <span style={{fontSize:isMobile?12:14,fontWeight:600,color:"#a78bfa"}}>Prognoza</span>
+                    </div>
+                    <div style={{fontSize:isMobile?18:24,fontWeight:800,color:"#a78bfa",fontFamily:"monospace"}}>{fmt(forecast.total)}</div>
+                    <div style={{fontSize:isMobile?10:12,color:"#44445a",marginTop:6}}>szacowana zaliczka</div>
+                  </div>
+                )}
+              </div>
+
+              {/* Chart */}
+              <div className="card" style={{padding:"20px",marginBottom:20}}>
+                <div style={{fontSize:isMobile?11:13,color:"#44445a",letterSpacing:".08em",textTransform:"uppercase",marginBottom:14}}>Ostatnie 6 miesięcy</div>
+                <div style={{display:"flex",alignItems:"flex-end",gap:isMobile?3:5,height:isMobile?60:80}}>
+                  {barData.map((b,i)=>(
+                    <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                      <div style={{width:"100%",display:"flex",gap:1.5,alignItems:"flex-end",height:isMobile?48:64}}>
+                        <div style={{flex:1,background:"rgba(74,222,128,.35)",borderRadius:"3px 3px 0 0",height:`${(b.inc/barMax)*100}%`,minHeight:b.inc>0?2:0}}/>
+                        <div style={{flex:1,background:"rgba(248,113,113,.35)",borderRadius:"3px 3px 0 0",height:`${(b.exp/barMax)*100}%`,minHeight:b.exp>0?2:0}}/>
+                      </div>
+                      <div style={{fontSize:isMobile?8:10,color:"#44445a"}}>{b.label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Month grid */}
+              <div>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+                  <div style={{fontSize:isMobile?11:13,color:"#44445a",letterSpacing:".08em",textTransform:"uppercase"}}>Historia</div>
+                  <div style={{display:"flex",gap:2}}>
+                    {YEARS.map(y=><button key={y} onClick={()=>setSelYear(y)} style={{padding:"6px 12px",borderRadius:8,background:selYear===y?"rgba(125,211,252,.15)":"rgba(255,255,255,.04)",color:selYear===y?"#7dd3fc":"#44445a",fontSize:12,fontWeight:600}}>{y}</button>)}
+                  </div>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(80px,1fr))",gap:8}}>
+                  {monthGrid.map(({m,net,hasData})=>{ const isCur=m===now.getMonth()&&selYear===now.getFullYear(); return (
+                    <div key={m} onClick={()=>{setSelMonth(m);setTab("month");}} style={{background:isCur?"rgba(125,211,252,.07)":"rgba(255,255,255,.03)",borderRadius:12,padding:"12px 8px",border:isCur?"1px solid rgba(125,211,252,.25)":"1px solid rgba(255,255,255,.05)",cursor:"pointer",textAlign:"center",transition:"all .2s"}}>
+                      <div style={{fontSize:11,fontWeight:600,marginBottom:4,color:isCur?"#7dd3fc":"#eeeaf4"}}>{MONTHS_SHORT[m]}</div>
+                      {hasData?<div style={{fontSize:11,fontWeight:700,color:net>=0?"#4ade80":"#f87171"}}>{fmt(net)}</div>:<div style={{fontSize:11,color:"#2a2a40"}}>—</div>}
+                    </div>
+                  ); })}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MONTH */}
+        {tab==="month" && (
+          <div style={{padding:isMobile?"56px 18px 0":"40px",maxWidth:1200,margin:"0 auto"}}>
             <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
-              <button onClick={()=>setTab("dashboard")} style={{width:36,height:36,borderRadius:12,background:"rgba(255,255,255,.07)",color:"#eeeaf4",fontSize:18}}>‹</button>
+              {isMobile && <button onClick={()=>setTab("dashboard")} style={{width:36,height:36,borderRadius:12,background:"rgba(255,255,255,.07)",color:"#eeeaf4",fontSize:18}}>‹</button>}
               <div style={{flex:1,display:"flex",gap:8}}>
-                <select className="select-box" style={{background:"rgba(255,255,255,.06)",borderRadius:12,padding:"6px 12px",fontSize:14,fontWeight:600,flex:2}} value={selMonth} onChange={e=>setSelMonth(Number(e.target.value))}>
+                <select className="select-box" style={{flex:isMobile?2:1}} value={selMonth} onChange={e=>setSelMonth(Number(e.target.value))}>
                   {MONTHS_FULL.map((mn,i)=><option key={i} value={i}>{mn}</option>)}
                 </select>
-                <select className="select-box" style={{background:"rgba(255,255,255,.06)",borderRadius:12,padding:"6px 12px",fontSize:14,fontWeight:600,flex:1}} value={selYear} onChange={e=>setSelYear(Number(e.target.value))}>
+                <select className="select-box" style={{flex:1}} value={selYear} onChange={e=>setSelYear(Number(e.target.value))}>
                   {YEARS.map(y=><option key={y} value={y}>{y}</option>)}
                 </select>
               </div>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-              {[{label:"Na reke",val:summary.realIncome,cls:"green"},{label:"Wydatki",val:summary.expense,cls:"red"},{label:"Bilans",val:summary.net,cls:summary.net>=0?"blue":"red"}].map(x=>(
-                <div key={x.label} className="card" style={{padding:"12px 10px",textAlign:"center"}}>
-                  <div style={{fontSize:9,color:"#44445a",textTransform:"uppercase",letterSpacing:".07em",marginBottom:4}}>{x.label}</div>
-                  <div className={x.cls} style={{fontSize:13,fontWeight:700}}>{fmt(x.val)}</div>
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr 1fr",gap:10,marginBottom:20}}>
+              {[{label:"Na rękę",val:summary.realIncome,cls:"green"},{label:"Wydatki",val:summary.expense,cls:"red"},{label:"Bilans",val:summary.net,cls:summary.net>=0?"blue":"red"}].map(x=>(
+                <div key={x.label} className="card" style={{padding:"14px 12px",textAlign:"center"}}>
+                  <div style={{fontSize:9,color:"#44445a",textTransform:"uppercase",marginBottom:4}}>{x.label}</div>
+                  <div className={x.cls} style={{fontSize:isMobile?13:15,fontWeight:700}}>{fmt(x.val)}</div>
                 </div>
               ))}
             </div>
-          </div>
-          <div style={{padding:"0 18px"}}>
-            {summary.entries.length===0 ? (
-              <div style={{textAlign:"center",padding:"50px 0",color:"#2a2a40"}}><div style={{fontSize:44,marginBottom:10}}>📋</div><div style={{fontSize:14}}>Brak transakcji</div></div>
-            ) : summary.entries.map((e,i)=>{ const cat=getCat(e.type,e.category); return (
-              <div key={e.id} className="row up" style={{animationDelay:`${i*.03}s`}} onClick={()=>openEditTx(e)}>
-                <div style={{width:42,height:42,borderRadius:13,background:e.type==="income"?"rgba(74,222,128,.1)":"rgba(248,113,113,.08)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:19,flexShrink:0}}>{cat.icon}</div>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:14,fontWeight:500,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-                    {cat.label}
-                    {e.isRecurring&&<span className="pill bg-blue" style={{fontSize:9}}>STALY</span>}
-                    {cat.isTaxed&&<span className="pill bg-violet" style={{fontSize:9}}>BRUTTO</span>}
-                    {e.reverseCharge&&<span className="pill" style={{fontSize:9,background:"rgba(34,211,238,.12)",color:"#22d3ee"}}>RC</span>}
+            <div style={{background:isMobile?"none":"rgba(255,255,255,.02)",borderRadius:isMobile?0:14,padding:isMobile?0:20}}>
+              {summary.entries.length===0 ? (
+                <div style={{textAlign:"center",padding:"50px 0",color:"#2a2a40"}}><div style={{fontSize:44,marginBottom:10}}>📋</div><div>Brak transakcji</div></div>
+              ) : summary.entries.map((e,i)=>{ const cat=getCat(e.type,e.category); return (
+                <div key={e.id} className="row" onClick={()=>openEditTx(e)} style={{cursor:"pointer",padding:isMobile?"13px 0":"16px 0"}}>
+                  <div style={{width:42,height:42,borderRadius:13,background:e.type==="income"?"rgba(74,222,128,.1)":"rgba(248,113,113,.08)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:19,flexShrink:0}}>{cat.icon}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:isMobile?13:15,fontWeight:500,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                      {cat.label}
+                      {e.isRecurring&&<span className="pill bg-blue">STAŁY</span>}
+                      {cat.isTaxed&&<span className="pill bg-violet">BRUTTO</span>}
+                      {e.reverseCharge&&<span className="pill" style={{fontSize:9,background:"rgba(34,211,238,.12)",color:"#22d3ee"}}>RC</span>}
+                    </div>
+                    {e.note&&<div style={{fontSize:11,color:"#44445a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.note}</div>}
                   </div>
-                  {e.note&&<div style={{fontSize:11,color:"#44445a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.note}</div>}
+                  <div style={{textAlign:"right",flexShrink:0}}>
+                    <div style={{fontSize:isMobile?14:15,fontWeight:700,color:e.type==="income"?"#4ade80":"#f87171"}}>{e.type==="income"?"+":"-"}{fmt(e.amount)}</div>
+                    <div style={{fontSize:9,color:"#2a2a40"}}>{new Date(e.date).toLocaleDateString("pl-PL")}</div>
+                  </div>
+                  <button onClick={ev=>{ev.stopPropagation();deleteTx(e);}} style={{width:26,height:26,borderRadius:8,background:"rgba(248,113,113,.1)",color:"#f87171",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>×</button>
                 </div>
-                <div style={{textAlign:"right",flexShrink:0}}>
-                  <div style={{fontSize:15,fontWeight:700,color:e.type==="income"?"#4ade80":"#f87171"}}>{e.type==="income"?"+":"-"}{fmt(e.amount)}</div>
-                  <div style={{fontSize:9,color:"#2a2a40"}}>{new Date(e.date).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit"})}</div>
-                </div>
-                <button onClick={ev=>{ev.stopPropagation();deleteTx(e);}} style={{width:26,height:26,borderRadius:8,background:"rgba(248,113,113,.1)",color:"#f87171",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>×</button>
-              </div>
-            ); })}
-          </div>
-          <div style={{padding:"20px 18px 0",display:"flex",justifyContent:"center"}}>
-            <button onClick={()=>{setEditTarget(null);setTxForm({type:"expense",amount:"",category:"food",note:"",year:selYear,month:selMonth,reverseCharge:false,inputMode:"brutto"});setModal("addTx");}} style={{background:"linear-gradient(135deg,#2dd4bf,#14b8a6)",color:"#fff",borderRadius:16,padding:"14px 32px",fontSize:14,fontWeight:700}}>
-              + Dodaj transakcje
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* TAXES */}
-      {tab==="taxes" && (
-        <div style={{padding:"0 0 110px",position:"relative",zIndex:1}}>
-          <div style={{padding:"56px 18px 20px"}}>
-            <div style={{fontSize:20,fontWeight:700}}>Podatki i skladki</div>
-            <div style={{display:"flex",gap:6,marginTop:10}}>
-              {YEARS.map(y=><button key={y} onClick={()=>setSelYear(y)} style={{padding:"6px 12px",borderRadius:10,background:selYear===y?"rgba(167,139,250,.15)":"rgba(255,255,255,.04)",color:selYear===y?"#a78bfa":"#666",fontSize:12,fontWeight:600}}>{y}</button>)}
+              ); })}
+            </div>
+            <div style={{padding:isMobile?"20px 18px 0":"20px 0 0",display:"flex",justifyContent:isMobile?"center":"flex-start"}}>
+              <button onClick={()=>{setEditTarget(null);setTxForm({type:"expense",amount:"",category:"food",note:"",year:selYear,month:selMonth,reverseCharge:false,inputMode:"brutto"});setModal("addTx");}} style={{background:"linear-gradient(135deg,#2dd4bf,#14b8a6)",color:"#fff",borderRadius:16,padding:"14px 32px",fontSize:14,fontWeight:700}}>
+                + Dodaj transakcję
+              </button>
             </div>
           </div>
-          <div className="card" style={{margin:"0 18px 14px",padding:"20px"}}>
-            <div style={{fontSize:11,color:"#a78bfa",textTransform:"uppercase",letterSpacing:".1em",marginBottom:14}}>Rok {selYear}</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-              <div style={{background:"rgba(167,139,250,.06)",borderRadius:13,padding:"12px"}}>
-                <div style={{fontSize:10,color:"#888",textTransform:"uppercase",marginBottom:6}}>Podatki</div>
-                <div className="amber" style={{fontSize:18,fontWeight:800,fontFamily:"monospace"}}>{fmt(yearTax.totalTax)}</div>
-              </div>
-              <div style={{background:"rgba(167,139,250,.06)",borderRadius:13,padding:"12px"}}>
-                <div style={{fontSize:10,color:"#888",textTransform:"uppercase",marginBottom:6}}>Skladki</div>
-                <div className="violet" style={{fontSize:18,fontWeight:800,fontFamily:"monospace"}}>{fmt(yearTax.totalSkladki)}</div>
-              </div>
+        )}
+
+        {/* TAXES */}
+        {tab==="taxes" && (
+          <div style={{padding:isMobile?"56px 18px":"40px",maxWidth:1200,margin:"0 auto"}}>
+            <div style={{fontSize:isMobile?18:24,fontWeight:700,marginBottom:20}}>Podatki i składki</div>
+            <div style={{display:"flex",gap:6,marginBottom:20}}>
+              {YEARS.map(y=><button key={y} onClick={()=>setSelYear(y)} style={{padding:"8px 14px",borderRadius:10,background:selYear===y?"rgba(167,139,250,.15)":"rgba(255,255,255,.04)",color:selYear===y?"#a78bfa":"#666",fontSize:12,fontWeight:600}}>{y}</button>)}
             </div>
-            {yearTax.totalUopBrutto>0 && (
-              <div style={{marginBottom:14,padding:"14px",background:"rgba(0,0,0,.3)",borderRadius:13}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}><span>💼</span><span style={{fontSize:13,fontWeight:600}}>Umowa o prace</span></div>
-                <div className="breakdown-grid">
-                  <div>Brutto</div><div>{fmtDec(yearTax.totalUopBrutto)}</div>
-                  <div>ZUS spoleczne</div><div className="violet">{fmtDec(yearTax.totalUopZus)}</div>
-                  <div>Zdrowotna</div><div className="violet">{fmtDec(yearTax.totalUopZdrow)}</div>
-                  <div>PIT</div><div className="amber">{fmtDec(yearTax.totalUopPit)}</div>
-                  <div style={{color:"#4ade80",fontWeight:600}}>Na reke</div><div className="green">{fmtDec(yearTax.totalUopNetto)}</div>
+            <div className="card" style={{padding:"20px",marginBottom:20}}>
+              <div style={{fontSize:isMobile?12:14,color:"#a78bfa",textTransform:"uppercase",letterSpacing:".1em",marginBottom:16}}>Rok {selYear}</div>
+              <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12,marginBottom:16}}>
+                <div style={{background:"rgba(167,139,250,.06)",borderRadius:13,padding:"14px"}}>
+                  <div style={{fontSize:10,color:"#888",textTransform:"uppercase",marginBottom:8}}>Podatki</div>
+                  <div className="amber" style={{fontSize:isMobile?18:22,fontWeight:800,fontFamily:"monospace"}}>{fmt(yearTax.totalTax)}</div>
+                </div>
+                <div style={{background:"rgba(167,139,250,.06)",borderRadius:13,padding:"14px"}}>
+                  <div style={{fontSize:10,color:"#888",textTransform:"uppercase",marginBottom:8}}>Składki</div>
+                  <div className="violet" style={{fontSize:isMobile?18:22,fontWeight:800,fontFamily:"monospace"}}>{fmt(yearTax.totalSkladki)}</div>
                 </div>
               </div>
-            )}
-            {yearTax.totalJdgPrzychod>0 && (
-              <div style={{padding:"14px",background:"rgba(0,0,0,.3)",borderRadius:13}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}><span>📈</span><span style={{fontSize:13,fontWeight:600}}>JDG – ryczalt 12%</span></div>
-                <div className="breakdown-grid">
-                  <div>Przychod</div><div>{fmtDec(yearTax.totalJdgPrzychod)}</div>
-                  <div>Zdrowotna</div><div className="violet">{fmtDec(yearTax.totalJdgZdrow)}</div>
-                  <div>Ryczalt 12%</div><div className="amber">{fmtDec(yearTax.totalJdgRyczalt)}</div>
-                  <div style={{color:"#4ade80",fontWeight:600}}>Na reke</div><div className="green">{fmtDec(yearTax.totalJdgNetto)}</div>
-                </div>
-                <div style={{marginTop:10,padding:"8px 12px",background:"rgba(74,222,128,.06)",borderRadius:10,fontSize:11,color:"#4ade80"}}>✓ Zwolniony z ZUS (UoP pokrywa)</div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* RECURRING */}
-      {tab==="recurring" && (
-        <div style={{padding:"0 0 110px",position:"relative",zIndex:1}}>
-          <div style={{padding:"56px 18px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <div><div style={{fontSize:20,fontWeight:700}}>Stale wydatki</div><div style={{fontSize:12,color:"#44445a",marginTop:2}}>Kopiowane automatycznie</div></div>
-            <button onClick={()=>{setEditTarget(null);setRecurForm({label:"",amount:"",category:"bills",icon:"📄",startYear:now.getFullYear(),startMonth:now.getMonth()});setModal("addRecur");}} style={{width:38,height:38,borderRadius:13,background:"rgba(45,212,191,.15)",color:"#2dd4bf",fontSize:22,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
-          </div>
-          <div className="card" style={{margin:"0 18px 20px",padding:"16px 18px",display:"flex",justifyContent:"space-between"}}>
-            <div style={{fontSize:13,color:"#44445a"}}>Suma miesieczna</div>
-            <div style={{fontSize:20,fontWeight:800,color:"#2dd4bf"}}>{fmt(recurring.reduce((s,r)=>s+r.amount,0))}</div>
-          </div>
-          <div style={{padding:"0 18px"}}>
-            {recurring.length===0 ? <div style={{textAlign:"center",padding:"50px 0",color:"#2a2a40"}}><div style={{fontSize:44,marginBottom:10}}>🔄</div><div style={{fontSize:14}}>Brak stalych wydatkow</div></div>
-            : recurring.map((r,i)=>{ const cat=getCat("expense",r.category); return (
-              <div key={r.id} className="row up" style={{animationDelay:`${i*.04}s`}} onClick={()=>openEditRecur(r)}>
-                <div style={{width:42,height:42,borderRadius:13,background:"rgba(248,113,113,.08)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:19,flexShrink:0}}>{r.icon||cat.icon}</div>
-                <div style={{flex:1}}><div style={{fontSize:14,fontWeight:500}}>{r.label}</div><div style={{fontSize:11,color:"#44445a"}}>od {MONTHS_SHORT[r.startMonth]} {r.startYear}</div></div>
-                <div style={{fontSize:15,fontWeight:700,color:"#f87171"}}>{fmt(r.amount)}/mies.</div>
-                <button onClick={ev=>{ev.stopPropagation();deleteRecur(r.id);}} style={{width:26,height:26,borderRadius:8,background:"rgba(248,113,113,.1)",color:"#f87171",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>×</button>
-              </div>
-            ); })}
-          </div>
-        </div>
-      )}
-
-      {/* GOALS */}
-      {tab==="goals" && (
-        <div style={{padding:"0 0 110px",position:"relative",zIndex:1}}>
-          <div style={{padding:"56px 18px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <div><div style={{fontSize:20,fontWeight:700}}>Cele oszczednosciowe</div><div style={{fontSize:12,color:"#44445a",marginTop:2}}>Sledz swoje marzenia</div></div>
-            <button onClick={()=>{setEditTarget(null);setGoalForm({name:"",icon:"🏠",target:"",saved:"",deadline:""});setModal("addGoal");}} style={{width:38,height:38,borderRadius:13,background:"rgba(251,191,36,.12)",color:"#fbbf24",fontSize:22,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
-          </div>
-          <div style={{padding:"0 18px",display:"flex",flexDirection:"column",gap:14}}>
-            {goals.length===0 ? <div style={{textAlign:"center",padding:"50px 0",color:"#2a2a40"}}><div style={{fontSize:44,marginBottom:10}}>🎯</div><div style={{fontSize:14}}>Brak celow</div></div>
-            : goals.map((g,gi)=>{
-              const pct=Math.min((g.saved/g.target)*100,100);
-              const remaining=Math.max(g.target-g.saved,0);
-              const avgSaving=(()=>{let total=0;for(let i=0;i<3;i++){let m=now.getMonth()-i,y=now.getFullYear();if(m<0){m+=12;y--;}const s=computeMonthSummary(y,m);if(s.net>0)total+=s.net;}return total/3;})();
-              const monthsNeeded=avgSaving>0?Math.ceil(remaining/avgSaving):null;
-              const deadline=g.deadline?new Date(g.deadline):null;
-              const daysLeft=deadline?Math.ceil((deadline-now)/(1000*60*60*24)):null;
-              const monthsLeft=daysLeft?Math.ceil(daysLeft/30):null;
-              const neededPerMonth=(monthsLeft&&monthsLeft>0&&remaining>0)?remaining/monthsLeft:null;
-              return (
-                <div key={g.id} className="card up" style={{padding:"18px",animationDelay:`${gi*.06}s`}}>
-                  <div style={{display:"flex",alignItems:"flex-start",gap:12,marginBottom:14}}>
-                    <div style={{width:48,height:48,borderRadius:15,background:"rgba(251,191,36,.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>{g.icon}</div>
-                    <div style={{flex:1}}><div style={{fontSize:16,fontWeight:700}}>{g.name}</div><div style={{fontSize:12,color:"#44445a",marginTop:2}}>{fmtDec(g.saved)} z {fmtDec(g.target)}</div></div>
-                    <div style={{fontSize:20,fontWeight:800,color:"#fbbf24"}}>{Math.round(pct)}%</div>
-                  </div>
-                  <div className="progress-bar" style={{marginBottom:14}}><div className="progress-fill" style={{width:`${pct}%`,background:"linear-gradient(90deg,#f59e0b,#fbbf24)"}}/></div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
-                    <div style={{background:"rgba(0,0,0,.3)",borderRadius:12,padding:"10px 8px",textAlign:"center"}}><div style={{fontSize:9,color:"#44445a",marginBottom:4,textTransform:"uppercase"}}>Pozostalo</div><div style={{fontSize:12,fontWeight:700,color:"#f87171"}}>{fmt(remaining)}</div></div>
-                    <div style={{background:"rgba(0,0,0,.3)",borderRadius:12,padding:"10px 8px",textAlign:"center"}}><div style={{fontSize:9,color:"#44445a",marginBottom:4,textTransform:"uppercase"}}>{neededPerMonth?"/miesiac":"Avg."}</div><div style={{fontSize:12,fontWeight:700,color:"#7dd3fc"}}>{neededPerMonth?fmt(neededPerMonth):(monthsNeeded?`${monthsNeeded} mies.`:"—")}</div></div>
-                    <div style={{background:"rgba(0,0,0,.3)",borderRadius:12,padding:"10px 8px",textAlign:"center"}}><div style={{fontSize:9,color:"#44445a",marginBottom:4,textTransform:"uppercase"}}>{deadline?"Termin":"Czas"}</div><div style={{fontSize:12,fontWeight:700,color:daysLeft&&daysLeft<90?"#f87171":"#fbbf24"}}>{deadline?(daysLeft>=0?`${daysLeft}d`:"Po term."):(monthsNeeded?`${monthsNeeded} m.`:"—")}</div></div>
-                  </div>
-                  {pct>=100&&<div style={{background:"rgba(74,222,128,.08)",borderRadius:12,padding:"10px 12px",marginBottom:12,fontSize:12,color:"#4ade80",display:"flex",alignItems:"center",gap:8}}><span>🎉</span><span>Cel osiagniety!</span></div>}
-                  <div style={{display:"flex",gap:8}}>
-                    <button onClick={()=>{setSavingForm({goalId:String(g.id),amount:""});setModal("addSaving");}} style={{flex:1,padding:"11px",borderRadius:13,background:"linear-gradient(135deg,#f59e0b,#fbbf24)",color:"#000",fontSize:13,fontWeight:700}}>+ Wplata</button>
-                    <button onClick={()=>openEditGoal(g)} style={{width:40,height:40,borderRadius:13,background:"rgba(255,255,255,.06)",color:"#eeeaf4",fontSize:16}}>✏️</button>
-                    <button onClick={()=>deleteGoal(g.id)} style={{width:40,height:40,borderRadius:13,background:"rgba(248,113,113,.08)",color:"#f87171",fontSize:16}}>🗑</button>
+              {yearTax.totalUopBrutto>0 && (
+                <div style={{marginBottom:14,padding:"14px",background:"rgba(0,0,0,.3)",borderRadius:13}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}><span>💼</span><span style={{fontSize:13,fontWeight:600}}>Umowa o pracę</span></div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:"4px 12px",fontSize:isMobile?11:12}}>
+                    <div style={{color:"#888"}}>Brutto</div><div style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalUopBrutto)}</div>
+                    <div style={{color:"#888"}}>ZUS społeczne</div><div className="violet" style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalUopZus)}</div>
+                    <div style={{color:"#888"}}>Zdrowotna</div><div className="violet" style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalUopZdrow)}</div>
+                    <div style={{color:"#888"}}>PIT</div><div className="amber" style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalUopPit)}</div>
+                    <div style={{color:"#4ade80",fontWeight:600}}>Na rękę</div><div className="green" style={{fontFamily:"monospace",fontWeight:700,textAlign:"right"}}>{fmtDec(yearTax.totalUopNetto)}</div>
                   </div>
                 </div>
-              );
-            })}
+              )}
+              {yearTax.totalJdgPrzychod>0 && (
+                <div style={{padding:"14px",background:"rgba(0,0,0,.3)",borderRadius:13}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}><span>📈</span><span style={{fontSize:13,fontWeight:600}}>JDG – ryczałt 12%</span></div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:"4px 12px",fontSize:isMobile?11:12}}>
+                    <div style={{color:"#888"}}>Przychód</div><div style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalJdgPrzychod)}</div>
+                    <div style={{color:"#888"}}>Zdrowotna</div><div className="violet" style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalJdgZdrow)}</div>
+                    <div style={{color:"#888"}}>Ryczałt 12%</div><div className="amber" style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalJdgRyczalt)}</div>
+                    <div style={{color:"#4ade80",fontWeight:600}}>Na rękę</div><div className="green" style={{fontFamily:"monospace",fontWeight:700,textAlign:"right"}}>{fmtDec(yearTax.totalJdgNetto)}</div>
+                  </div>
+                  <div style={{marginTop:10,padding:"8px 12px",background:"rgba(74,222,128,.06)",borderRadius:10,fontSize:11,color:"#4ade80"}}>✓ Zwolniony z ZUS</div>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* BACKUP */}
-      {tab==="backup" && (
-        <div style={{padding:"0 0 110px",position:"relative",zIndex:1}}>
-          <div style={{padding:"56px 18px 20px"}}>
-            <div style={{fontSize:20,fontWeight:700}}>Backup danych</div>
-            <div style={{fontSize:12,color:"#44445a",marginTop:2}}>Szyfrowanie AES-256</div>
-          </div>
+        {/* BACKUP */}
+        {tab==="backup" && (
+          <div style={{padding:isMobile?"56px 18px":"40px",maxWidth:800,margin:"0 auto"}}>
+            <div style={{fontSize:isMobile?18:24,fontWeight:700,marginBottom:10}}>Backup danych</div>
+            <div style={{fontSize:isMobile?11:13,color:"#44445a",marginBottom:24}}>Szyfrowanie AES-256</div>
 
-          <div style={{padding:"0 18px",display:"flex",flexDirection:"column",gap:14}}>
-
-            {/* Status */}
             {backupStatus && (
-              <div style={{padding:"12px 16px",borderRadius:14,background: backupStatus.startsWith("✅")?"rgba(74,222,128,.08)":backupStatus.startsWith("⚠️")?"rgba(251,191,36,.08)":"rgba(248,113,113,.08)", border: backupStatus.startsWith("✅")?"1px solid rgba(74,222,128,.2)":backupStatus.startsWith("⚠️")?"1px solid rgba(251,191,36,.2)":"1px solid rgba(248,113,113,.2)", fontSize:13, color: backupStatus.startsWith("✅")?"#4ade80":backupStatus.startsWith("⚠️")?"#fbbf24":"#f87171"}}>
+              <div style={{padding:"12px 16px",borderRadius:14,background:backupStatus.startsWith("✅")?"rgba(74,222,128,.08)":backupStatus.startsWith("⚠️")?"rgba(251,191,36,.08)":"rgba(248,113,113,.08)",border:backupStatus.startsWith("✅")?"1px solid rgba(74,222,128,.2)":backupStatus.startsWith("⚠️")?"1px solid rgba(251,191,36,.2)":"1px solid rgba(248,113,113,.2)",fontSize:isMobile?12:13,color:backupStatus.startsWith("✅")?"#4ade80":backupStatus.startsWith("⚠️")?"#fbbf24":"#f87171",marginBottom:20}}>
                 {backupStatus}
               </div>
             )}
 
-            {/* Ostatni backup */}
-            <div className="card" style={{padding:"16px 18px"}}>
+            <div className="card" style={{padding:"16px 18px",marginBottom:20}}>
               <div style={{fontSize:11,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>Ostatni backup</div>
-              <div style={{fontSize:15,fontWeight:600,color:lastBackup?"#4ade80":"#f87171"}}>
-                {lastBackup ? new Date(lastBackup).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}) : "Brak backupu"}
+              <div style={{fontSize:isMobile?14:15,fontWeight:600,color:lastBackup?"#4ade80":"#f87171"}}>
+                {lastBackup ? new Date(lastBackup).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"}) : "Brak backupu"}
               </div>
-              {lastBackup && isBackupDue() && <div style={{fontSize:11,color:"#fbbf24",marginTop:4}}>⚠️ Minelo ponad 7 dni — zrob backup!</div>}
             </div>
 
-            {/* Haslo */}
-            <div className="card" style={{padding:"18px"}}>
-              <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>🔑 Haslo szyfrowania</div>
-              <div style={{fontSize:11,color:"#666",marginBottom:14,lineHeight:1.5}}>Tym haslem beda szyfrowane Twoje backupy. Zapisz je bezpiecznie — bez niego nie odszyfrujesz danych.</div>
-
-              <div className="input-box" style={{marginBottom:12}}>
-                <input type={showPassword?"text":"password"} placeholder="Wpisz lub wygeneruj haslo..." value={backupPassword} onChange={e=>setBackupPassword(e.target.value)} style={{flex:1,fontSize:14}}/>
-                <button onClick={()=>setShowPassword(p=>!p)} style={{background:"none",color:"#666",fontSize:18,padding:"0 4px"}}>{showPassword?"🙈":"👁️"}</button>
+            <div className="card" style={{padding:"18px",marginBottom:20}}>
+              <div style={{fontSize:13,fontWeight:600,marginBottom:8}}>🔑 Hasło szyfrowania</div>
+              <div className="input-box" style={{marginBottom:14}}>
+                <input type={showPassword?"text":"password"} placeholder="Wpisz lub wygeneruj hasło..." value={backupPassword} onChange={e=>setBackupPassword(e.target.value)} style={{flex:1,fontSize:14}}/>
+                <button onClick={()=>setShowPassword(p=>!p)} style={{background:"none",color:"#666",fontSize:18}}>  {showPassword?"🙈":"👁️"}</button>
               </div>
-
-              <button onClick={handleGeneratePassword} style={{width:"100%",padding:"12px",borderRadius:13,background:"rgba(125,211,252,.1)",color:"#7dd3fc",fontSize:13,fontWeight:600}}>
-                🎲 Wygeneruj silne haslo
+              <button onClick={handleGeneratePassword} style={{width:"100%",padding:"12px",borderRadius:13,background:"rgba(125,211,252,.1)",color:"#7dd3fc",fontSize:13,fontWeight:600,marginBottom:12}}>
+                🎲 Wygeneruj silne hasło
               </button>
-
-              {backupPassword && (
-                <div style={{marginTop:10,padding:"10px 12px",background:"rgba(251,191,36,.06)",borderRadius:10,fontSize:11,color:"#fbbf24"}}>
-                  ⚠️ Haslo jest zapisane lokalnie. Zapisz je rowniez w bezpiecznym miejscu (np. 1Password, notatnik offline).
-                </div>
-              )}
+              {backupPassword && <div style={{padding:"10px 12px",background:"rgba(251,191,36,.06)",borderRadius:10,fontSize:11,color:"#fbbf24"}}>⚠️ Zapisz hasło w bezpiecznym miejscu</div>}
             </div>
 
-            {/* Backup */}
             <div className="card" style={{padding:"18px"}}>
-              <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>💾 Wykonaj backup</div>
-              <div style={{fontSize:11,color:"#666",marginBottom:14,lineHeight:1.5}}>
-                Plik backupu zostanie pobrany zaszyfrowany. Zapisz go recznie w Google Drive / iCloud / email.
-              </div>
-              <button onClick={handleBackup} disabled={backupLoading||!backupPassword} style={{width:"100%",padding:"15px",borderRadius:14,background:backupPassword?"linear-gradient(135deg,#4ade80,#22c55e)":"rgba(255,255,255,.05)",color:backupPassword?"#000":"#444",fontSize:14,fontWeight:700,opacity:backupLoading?0.7:1}}>
-                {backupLoading?"Szyfrowanie...":"⬇️ Pobierz backup (zaszyfrowany)"}
+              <div style={{fontSize:13,fontWeight:600,marginBottom:8}}>💾 Wykonaj backup</div>
+              <button onClick={handleBackup} disabled={backupLoading||!backupPassword} style={{width:"100%",padding:"15px",borderRadius:14,background:backupPassword?"linear-gradient(135deg,#4ade80,#22c55e)":"rgba(255,255,255,.05)",color:backupPassword?"#000":"#444",fontSize:14,fontWeight:700,marginBottom:12,opacity:backupLoading?0.7:1}}>
+                {backupLoading?"Szyfrowanie...":"⬇️ Pobierz backup"}
               </button>
-              <div style={{marginTop:10,fontSize:11,color:"#555",lineHeight:1.5}}>
-                Po pobraniu: otwórz Google Drive / iCloud na telefonie i wgraj plik .enc
-              </div>
-            </div>
-
-            {/* Restore */}
-            <div className="card" style={{padding:"18px"}}>
-              <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>📥 Przywroc dane</div>
-              <div style={{fontSize:11,color:"#666",marginBottom:14,lineHeight:1.5}}>Wgraj plik backupu i podaj haslo aby przywrocic dane.</div>
-
               <input type="file" ref={fileInputRef} accept=".enc,.txt" onChange={handleFileRestore} style={{display:"none"}}/>
-              <button onClick={()=>fileInputRef.current?.click()} style={{width:"100%",padding:"13px",borderRadius:13,background:"rgba(125,211,252,.08)",color:"#7dd3fc",fontSize:13,fontWeight:600,marginBottom:10}}>
-                📂 Wybierz plik backupu (.enc)
+              <button onClick={()=>fileInputRef.current?.click()} style={{width:"100%",padding:"13px",borderRadius:13,background:"rgba(125,211,252,.08)",color:"#7dd3fc",fontSize:13,fontWeight:600}}>
+                📂 Wgraj plik backupu
               </button>
-
               {showRestoreInput && (
                 <>
-                  <div style={{fontSize:11,color:"#4ade80",marginBottom:10}}>✅ Plik wczytany. Podaj haslo:</div>
+                  <div style={{fontSize:11,color:"#4ade80",marginTop:12,marginBottom:10}}>✅ Plik wczytany. Podaj hasło:</div>
                   <div className="input-box" style={{marginBottom:12}}>
-                    <input type="password" placeholder="Haslo do odszyfrowania..." value={restorePassword} onChange={e=>setRestorePassword(e.target.value)} style={{flex:1,fontSize:14}}/>
+                    <input type="password" placeholder="Hasło..." value={restorePassword} onChange={e=>setRestorePassword(e.target.value)} style={{flex:1,fontSize:14}}/>
                   </div>
                   <button onClick={handleRestore} disabled={backupLoading} style={{width:"100%",padding:"15px",borderRadius:14,background:"linear-gradient(135deg,#f59e0b,#fbbf24)",color:"#000",fontSize:14,fontWeight:700}}>
-                    {backupLoading?"Odszyfrowywanie...":"🔓 Przywroc dane"}
+                    {backupLoading?"Odszyfrowywanie...":"🔓 Przywróć dane"}
                   </button>
                 </>
               )}
             </div>
+          </div>
+        )}
 
-            {/* Info */}
-            <div style={{padding:"14px 16px",background:"rgba(255,255,255,.03)",borderRadius:14,border:"1px solid rgba(255,255,255,.06)"}}>
-              <div style={{fontSize:12,color:"#555",lineHeight:1.6}}>
-                🔐 <strong style={{color:"#888"}}>Jak dziala szyfrowanie:</strong><br/>
-                Dane sa szyfrowane algorytmem AES-256-GCM z kluczem derywowanym przez PBKDF2 (310,000 iteracji). Szyfrowanie odbywa sie lokalnie na urzadzeniu — zadne dane nie trafiaja na serwery. Tylko Ty znasz haslo.
-              </div>
+        {/* RECURRING, GOALS — Skróty */}
+        {(tab==="recurring"||tab==="goals") && (
+          <div style={{padding:isMobile?"56px 18px":"40px",maxWidth:1200,margin:"0 auto"}}>
+            <div style={{fontSize:isMobile?18:24,fontWeight:700,marginBottom:20}}>{tab==="recurring"?"Stałe wydatki":"Cele oszczędnościowe"}</div>
+            <div style={{textAlign:"center",padding:"60px 20px",color:"#44445a"}}>
+              Ta sekcja będzie dostępna — w pracy 🚀
             </div>
           </div>
-        </div>
-      )}
-
-      {/* BOTTOM NAV */}
-      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:"rgba(8,8,14,.94)",backdropFilter:"blur(20px)",borderTop:"1px solid rgba(255,255,255,.06)",padding:"10px 4px 26px",display:"flex",alignItems:"center",justifyContent:"space-around",zIndex:100}}>
-        {[
-          {id:"dashboard",icon:"◎",label:"Glowna"},
-          {id:"month",icon:"≡",label:"Miesiac"},
-          {id:"taxes",icon:"🧾",label:"Podatki"},
-          {id:"recurring",icon:"🔄",label:"Stale"},
-          {id:"goals",icon:"🎯",label:"Cele"},
-          {id:"backup",icon:"🔐",label:"Backup"},
-        ].map(n=>(
-          <button key={n.id} className="nav-btn" onClick={()=>setTab(n.id)} style={{color:tab===n.id?"#eeeaf4":"#2a2a40"}}>
-            <span style={{fontSize:18}}>{n.icon}</span>
-            <span style={{fontSize:8,fontWeight:600,letterSpacing:".06em",textTransform:"uppercase",color:tab===n.id?"#a78bfa":"#2a2a40"}}>{n.label}</span>
-          </button>
-        ))}
+        )}
       </div>
 
-      {/* MODALS */}
-      {modal==="addTx" && (
-        <div className="modal-bg" onClick={e=>{if(e.target===e.currentTarget){setModal(null);setEditTarget(null);}}}>
-          <div className="modal">
-            <div className="drag-handle"/>
-            <div style={{fontSize:17,fontWeight:700,marginBottom:18}}>{editTarget?"Edytuj":"Nowa transakcja"}</div>
-            <div style={{display:"flex",background:"rgba(255,255,255,.04)",borderRadius:14,padding:4,marginBottom:18}}>
-              <button className={`tab ${txForm.type==="expense"?"on":""}`} onClick={()=>setTxForm(f=>({...f,type:"expense",category:"food"}))}>💸 Wydatek</button>
-              <button className={`tab ${txForm.type==="income"?"on":""}`} onClick={()=>setTxForm(f=>({...f,type:"income",category:"uop"}))}>💰 Przychod</button>
-            </div>
-            {!editTarget&&(<div style={{display:"flex",gap:8,marginBottom:14}}>
-              <select className="select-box" style={{flex:2}} value={txForm.month} onChange={e=>setTxForm(f=>({...f,month:Number(e.target.value)}))}>
-                {MONTHS_FULL.map((m,i)=><option key={i} value={i}>{m}</option>)}
-              </select>
-              <select className="select-box" style={{flex:1}} value={txForm.year} onChange={e=>setTxForm(f=>({...f,year:Number(e.target.value)}))}>
-                {YEARS.map(y=><option key={y} value={y}>{y}</option>)}
-              </select>
-            </div>)}
-            {txForm.type==="income"&&(txForm.category==="uop"||txForm.category==="jdg_ryczalt")&&(
-              <div style={{display:"flex",background:"rgba(255,255,255,.04)",borderRadius:12,padding:3,marginBottom:10}}>
-                {["brutto","netto"].map(mode=>(
-                  <button key={mode} onClick={()=>setTxForm(f=>({...f,inputMode:mode,amount:""}))} style={{flex:1,padding:"9px 6px",borderRadius:10,background:txForm.inputMode===mode?"rgba(255,255,255,.1)":"none",color:txForm.inputMode===mode?"#eeeaf4":"#44445a",fontSize:12,fontWeight:600,textTransform:"uppercase",transition:"all .15s"}}>
-                    {mode==="brutto"?"BRUTTO":"NETTO (na reke)"}
-                  </button>
-                ))}
-              </div>
-            )}
-            <div className="input-box" style={{marginBottom:6}}>
-              <span style={{fontSize:14,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
-              <input type="number" inputMode="decimal" placeholder="0,00" value={txForm.amount} onChange={e=>setTxForm(f=>({...f,amount:e.target.value}))} style={{flex:1,fontSize:26,fontWeight:700,fontFamily:"monospace"}}/>
-              {txForm.inputMode==="netto"&&txForm.type==="income"&&(txForm.category==="uop"||txForm.category==="jdg_ryczalt")&&<span style={{fontSize:10,color:"#22d3ee",fontWeight:700,flexShrink:0}}>NETTO</span>}
-            </div>
-            {txForm.type==="income"&&(txForm.category==="uop"||txForm.category==="jdg_ryczalt")&&txForm.amount&&(()=>{
-              const amt=parseFloat(String(txForm.amount).replace(",","."));
-              if(!amt||amt<=0) return null;
-              const cat=getCat("income",txForm.category);
-              const ytd=computeYtdContext(txForm.year,txForm.month);
-              const isNetto=txForm.inputMode==="netto";
-              let result;
-              if(cat.taxType==="uop") result=isNetto?calcUoPFromNetto(amt,ytd.uopPitBase):calcUoP(amt,ytd.uopPitBase);
-              else result=isNetto?calcRyczaltFromNetto(amt,ytd.ryczaltPrzychod):calcRyczalt(amt,ytd.ryczaltPrzychod);
-              if(!result) return null;
-              return (
-                <div style={{marginBottom:14,padding:"12px 14px",background:"rgba(167,139,250,.06)",borderRadius:12,fontSize:12}}>
-                  <div style={{color:"#a78bfa",fontWeight:600,marginBottom:8,fontSize:11,textTransform:"uppercase"}}>{isNetto?"Przeliczam z netto:":"Z brutto licze:"}</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:"4px 14px",fontFamily:"monospace"}}>
-                    {isNetto&&cat.taxType==="uop"&&<><span style={{color:"#22d3ee"}}>Brutto (obl.)</span><span style={{color:"#22d3ee",fontWeight:700}}>{fmtDec(result.brutto)}</span></>}
-                    {isNetto&&cat.taxType==="ryczalt12"&&<><span style={{color:"#22d3ee"}}>Przychod (obl.)</span><span style={{color:"#22d3ee",fontWeight:700}}>{fmtDec(result.przychod)}</span></>}
-                    {cat.taxType==="uop"&&<><span style={{color:"#888"}}>ZUS spol.</span><span className="violet">-{fmtDec(result.zusSpol)}</span><span style={{color:"#888"}}>Zdrowotna</span><span className="violet">-{fmtDec(result.zdrow)}</span><span style={{color:"#888"}}>PIT</span><span className="amber">-{fmtDec(result.pit)}</span></>}
-                    {cat.taxType==="ryczalt12"&&<><span style={{color:"#888"}}>Zdrowotna</span><span className="violet">-{fmtDec(result.zdrow)}</span><span style={{color:"#888"}}>Ryczalt 12%</span><span className="amber">-{fmtDec(result.ryczalt)}</span></>}
-                    <span style={{color:"#4ade80",fontWeight:600}}>Na reke</span><span className="green" style={{fontWeight:700}}>{fmtDec(result.netto)}</span>
-                  </div>
-                </div>
-              );
-            })()}
-            <div style={{fontSize:11,color:"#44445a",marginBottom:8,textTransform:"uppercase",letterSpacing:".08em",marginTop:8}}>Kategoria</div>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
-              {(txForm.type==="income"?CAT_INCOME:CAT_EXPENSE).map(c=>(
-                <div key={c.id} className={`cat-chip ${txForm.category===c.id?(txForm.type==="income"?"sel-inc":"sel-exp"):""}`} onClick={()=>setTxForm(f=>({...f,category:c.id,reverseCharge:c.id!=="jdg_ryczalt"?false:f.reverseCharge}))}>
-                  <span style={{fontSize:18}}>{c.icon}</span>{c.label}
-                </div>
-              ))}
-            </div>
-            {txForm.type==="income"&&txForm.category==="jdg_ryczalt"&&(
-              <div onClick={()=>setTxForm(f=>({...f,reverseCharge:!f.reverseCharge}))} style={{marginBottom:14,padding:"13px 16px",borderRadius:14,border:txForm.reverseCharge?"1.5px solid rgba(34,211,238,.45)":"1.5px solid rgba(255,255,255,.08)",background:txForm.reverseCharge?"rgba(34,211,238,.07)":"rgba(255,255,255,.03)",cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
-                <div style={{width:44,height:26,borderRadius:13,background:txForm.reverseCharge?"#22d3ee":"rgba(255,255,255,.1)",position:"relative",flexShrink:0}}>
-                  <div style={{position:"absolute",top:3,left:txForm.reverseCharge?21:3,width:20,height:20,borderRadius:10,background:"#fff",transition:"left .2s"}}/>
-                </div>
-                <div>
-                  <div style={{fontSize:13,fontWeight:600,color:txForm.reverseCharge?"#22d3ee":"#888"}}>Reverse Charge</div>
-                  <div style={{fontSize:11,color:"#555",marginTop:2}}>{txForm.reverseCharge?"Kwota = netto, VAT rozlicza nabywca":"Wlacz jesli VAT placi klient"}</div>
-                </div>
-              </div>
-            )}
-            <div className="input-box" style={{marginBottom:20}}>
-              <input type="text" placeholder="Notatka (opcjonalnie)" value={txForm.note} onChange={e=>setTxForm(f=>({...f,note:e.target.value}))} style={{flex:1,fontSize:15}}/>
-            </div>
-            <button className="btn-primary" onClick={submitTx} style={{background:txForm.type==="income"?"linear-gradient(135deg,#4ade80,#22c55e)":"linear-gradient(135deg,#f87171,#ef4444)"}}>
-              {editTarget?"Zapisz":"Dodaj"}
+      {/* MOBILE BOTTOM NAV */}
+      {isMobile && (
+        <div style={{position:"fixed",bottom:0,left:0,right:0,background:"rgba(8,8,14,.95)",backdropFilter:"blur(20px)",borderTop:"1px solid rgba(255,255,255,.06)",padding:"10px 0 20px",display:"flex",alignItems:"center",justifyContent:"space-around",zIndex:100}}>
+          {sidebarItems.map(item=>(
+            <button key={item.id} onClick={()=>setTab(item.id)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,background:"none",color:tab===item.id?"#eeeaf4":"#2a2a40",transition:"color .2s",padding:"4px 6px"}}>
+              <span style={{fontSize:18}}>{item.icon}</span>
+              <span style={{fontSize:8,fontWeight:600,letterSpacing:".06em",textTransform:"uppercase",color:tab===item.id?"#a78bfa":"#2a2a40"}}>{item.label}</span>
             </button>
-          </div>
+          ))}
         </div>
       )}
 
-      {modal==="addRecur" && (
+      {/* MODALS */}
+      {modal && (
         <div className="modal-bg" onClick={e=>{if(e.target===e.currentTarget){setModal(null);setEditTarget(null);}}}>
           <div className="modal">
-            <div className="drag-handle"/>
-            <div style={{fontSize:17,fontWeight:700,marginBottom:18}}>{editTarget?"Edytuj":"Nowy staly wydatek"}</div>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
-              {["📄","🏠","🚗","📱","💡","🌊","🏥","🎓","🐕","💳","🛡️","🎵"].map(icon=>(
-                <div key={icon} className={`icon-chip ${recurForm.icon===icon?"sel":""}`} onClick={()=>setRecurForm(f=>({...f,icon}))}>{icon}</div>
-              ))}
+            {isMobile && <div className="drag-handle"/>}
+            <div style={{fontSize:isMobile?16:18,fontWeight:700,marginBottom:18}}>
+              {modal==="addTx"?(editTarget?"Edytuj":"Nowa transakcja")
+              :modal==="addRecur"?(editTarget?"Edytuj":"Nowy stały wydatek")
+              :"Nowy cel"}
             </div>
-            <div className="input-box" style={{marginBottom:12}}><input type="text" placeholder="Nazwa" value={recurForm.label} onChange={e=>setRecurForm(f=>({...f,label:e.target.value}))} style={{flex:1,fontSize:15}}/></div>
-            <div className="input-box" style={{marginBottom:12}}>
-              <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
-              <input type="number" inputMode="decimal" placeholder="Kwota" value={recurForm.amount} onChange={e=>setRecurForm(f=>({...f,amount:e.target.value}))} style={{flex:1,fontSize:20,fontWeight:700,fontFamily:"monospace"}}/>
-            </div>
-            <div style={{fontSize:11,color:"#44445a",marginBottom:8,textTransform:"uppercase",letterSpacing:".08em"}}>Kategoria</div>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
-              {CAT_EXPENSE.map(c=>(
-                <div key={c.id} className={`cat-chip ${recurForm.category===c.id?"sel-exp":""}`} onClick={()=>setRecurForm(f=>({...f,category:c.id}))}>
-                  <span style={{fontSize:18}}>{c.icon}</span>{c.label}
+
+            {modal==="addTx" && (
+              <>
+                <div style={{display:"flex",background:"rgba(255,255,255,.04)",borderRadius:14,padding:4,marginBottom:18}}>
+                  <button style={{flex:1,padding:"10px 6px",borderRadius:10,background:txForm.type==="expense"?"rgba(255,255,255,.1)":"none",color:txForm.type==="expense"?"#eeeaf4":"#44445a",fontSize:12,fontWeight:600,textTransform:"uppercase"}} onClick={()=>setTxForm(f=>({...f,type:"expense",category:"food"}))}>💸 Wydatek</button>
+                  <button style={{flex:1,padding:"10px 6px",borderRadius:10,background:txForm.type==="income"?"rgba(255,255,255,.1)":"none",color:txForm.type==="income"?"#eeeaf4":"#44445a",fontSize:12,fontWeight:600,textTransform:"uppercase"}} onClick={()=>setTxForm(f=>({...f,type:"income",category:"uop"}))}>💰 Przychód</button>
                 </div>
-              ))}
-            </div>
-            <div style={{fontSize:11,color:"#44445a",marginBottom:8,textTransform:"uppercase",letterSpacing:".08em"}}>Obowiazuje od</div>
-            <div style={{display:"flex",gap:8,marginBottom:20}}>
-              <select className="select-box" style={{flex:2}} value={recurForm.startMonth} onChange={e=>setRecurForm(f=>({...f,startMonth:Number(e.target.value)}))}>
-                {MONTHS_FULL.map((m,i)=><option key={i} value={i}>{m}</option>)}
-              </select>
-              <select className="select-box" style={{flex:1}} value={recurForm.startYear} onChange={e=>setRecurForm(f=>({...f,startYear:Number(e.target.value)}))}>
-                {YEARS.map(y=><option key={y} value={y}>{y}</option>)}
-              </select>
-            </div>
-            <button className="btn-primary" onClick={submitRecur} style={{background:"linear-gradient(135deg,#2dd4bf,#14b8a6)"}}>{editTarget?"Zapisz":"Dodaj"}</button>
-          </div>
-        </div>
-      )}
+                {!editTarget&&(<div style={{display:"flex",gap:8,marginBottom:14}}>
+                  <select className="select-box" style={{flex:2}} value={txForm.month} onChange={e=>setTxForm(f=>({...f,month:Number(e.target.value)}))}>
+                    {MONTHS_FULL.map((m,i)=><option key={i} value={i}>{m}</option>)}
+                  </select>
+                  <select className="select-box" style={{flex:1}} value={txForm.year} onChange={e=>setTxForm(f=>({...f,year:Number(e.target.value)}))}>
+                    {YEARS.map(y=><option key={y} value={y}>{y}</option>)}
+                  </select>
+                </div>)}
+                <div className="input-box" style={{marginBottom:6}}>
+                  <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
+                  <input type="number" inputMode="decimal" placeholder="0,00" value={txForm.amount} onChange={e=>setTxForm(f=>({...f,amount:e.target.value}))} style={{flex:1,fontSize:isMobile?20:26,fontWeight:700,fontFamily:"monospace"}}/>
+                </div>
+                <div className="input-box" style={{marginBottom:20}}>
+                  <input type="text" placeholder="Notatka (opcjonalnie)" value={txForm.note} onChange={e=>setTxForm(f=>({...f,note:e.target.value}))} style={{flex:1,fontSize:14}}/>
+                </div>
+                <button className="btn-primary" onClick={submitTx} style={{background:txForm.type==="income"?"linear-gradient(135deg,#4ade80,#22c55e)":"linear-gradient(135deg,#f87171,#ef4444)"}}>
+                  {editTarget?"Zapisz":"Dodaj"}
+                </button>
+              </>
+            )}
 
-      {(modal==="addGoal"||modal==="editGoal") && (
-        <div className="modal-bg" onClick={e=>{if(e.target===e.currentTarget){setModal(null);setEditTarget(null);}}}>
-          <div className="modal">
-            <div className="drag-handle"/>
-            <div style={{fontSize:17,fontWeight:700,marginBottom:18}}>{editTarget?"Edytuj cel":"Nowy cel"}</div>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
-              {GOAL_ICONS.map(icon=><div key={icon} className={`icon-chip ${goalForm.icon===icon?"sel":""}`} onClick={()=>setGoalForm(f=>({...f,icon}))}>{icon}</div>)}
-            </div>
-            <div className="input-box" style={{marginBottom:12}}><input type="text" placeholder="Nazwa celu" value={goalForm.name} onChange={e=>setGoalForm(f=>({...f,name:e.target.value}))} style={{flex:1,fontSize:15}}/></div>
-            <div className="input-box" style={{marginBottom:12}}>
-              <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
-              <input type="number" inputMode="decimal" placeholder="Docelowo" value={goalForm.target} onChange={e=>setGoalForm(f=>({...f,target:e.target.value}))} style={{flex:1,fontSize:20,fontWeight:700,fontFamily:"monospace"}}/>
-            </div>
-            {!editTarget&&(<div className="input-box" style={{marginBottom:12}}>
-              <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
-              <input type="number" inputMode="decimal" placeholder="Juz odlozono" value={goalForm.saved} onChange={e=>setGoalForm(f=>({...f,saved:e.target.value}))} style={{flex:1,fontSize:20,fontWeight:700,fontFamily:"monospace"}}/>
-            </div>)}
-            <div style={{fontSize:11,color:"#44445a",marginBottom:8,textTransform:"uppercase",letterSpacing:".08em"}}>Deadline (opc.)</div>
-            <div className="input-box" style={{marginBottom:20}}><input type="date" value={goalForm.deadline} onChange={e=>setGoalForm(f=>({...f,deadline:e.target.value}))} style={{flex:1,fontSize:15,colorScheme:"dark"}}/></div>
-            <button className="btn-primary" onClick={submitGoal} style={{background:"linear-gradient(135deg,#f59e0b,#fbbf24)",color:"#000"}}>{editTarget?"Zapisz":"Utworz"}</button>
-          </div>
-        </div>
-      )}
+            {modal==="addRecur" && (
+              <>
+                <div className="input-box" style={{marginBottom:12}}><input type="text" placeholder="Nazwa" value={recurForm.label} onChange={e=>setRecurForm(f=>({...f,label:e.target.value}))} style={{flex:1,fontSize:14}}/></div>
+                <div className="input-box" style={{marginBottom:20}}>
+                  <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
+                  <input type="number" inputMode="decimal" placeholder="Kwota" value={recurForm.amount} onChange={e=>setRecurForm(f=>({...f,amount:e.target.value}))} style={{flex:1,fontSize:18,fontWeight:700,fontFamily:"monospace"}}/>
+                </div>
+                <button className="btn-primary" onClick={submitRecur} style={{background:"linear-gradient(135deg,#2dd4bf,#14b8a6)"}}>{editTarget?"Zapisz":"Dodaj"}</button>
+              </>
+            )}
 
-      {modal==="addSaving" && (
-        <div className="modal-bg" onClick={e=>{if(e.target===e.currentTarget)setModal(null);}}>
-          <div className="modal">
-            <div className="drag-handle"/>
-            <div style={{fontSize:17,fontWeight:700,marginBottom:18}}>Wplata do celu</div>
-            <select className="select-box" style={{marginBottom:14}} value={savingForm.goalId} onChange={e=>setSavingForm(f=>({...f,goalId:e.target.value}))}>
-              <option value="">Wybierz cel...</option>
-              {goals.map(g=><option key={g.id} value={String(g.id)}>{g.icon} {g.name}</option>)}
-            </select>
-            <div className="input-box" style={{marginBottom:20}}>
-              <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
-              <input type="number" inputMode="decimal" placeholder="Kwota" value={savingForm.amount} onChange={e=>setSavingForm(f=>({...f,amount:e.target.value}))} style={{flex:1,fontSize:26,fontWeight:700,fontFamily:"monospace"}}/>
-            </div>
-            <button className="btn-primary" onClick={submitSaving} style={{background:"linear-gradient(135deg,#f59e0b,#fbbf24)",color:"#000"}}>Dodaj wplate</button>
+            {(modal==="addGoal"||modal==="editGoal") && (
+              <>
+                <div className="input-box" style={{marginBottom:12}}><input type="text" placeholder="Nazwa celu" value={goalForm.name} onChange={e=>setGoalForm(f=>({...f,name:e.target.value}))} style={{flex:1,fontSize:14}}/></div>
+                <div className="input-box" style={{marginBottom:12}}>
+                  <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
+                  <input type="number" inputMode="decimal" placeholder="Docelowo" value={goalForm.target} onChange={e=>setGoalForm(f=>({...f,target:e.target.value}))} style={{flex:1,fontSize:18,fontWeight:700,fontFamily:"monospace"}}/>
+                </div>
+                <button className="btn-primary" onClick={submitGoal} style={{background:"linear-gradient(135deg,#f59e0b,#fbbf24)",color:"#000"}}>{editTarget?"Zapisz":"Utwórz"}</button>
+              </>
+            )}
           </div>
         </div>
       )}
