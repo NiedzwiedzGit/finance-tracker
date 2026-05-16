@@ -891,6 +891,14 @@ export default function App() {
                   <button style={{flex:1,padding:"10px 6px",borderRadius:10,background:txForm.type==="expense"?"rgba(255,255,255,.1)":"none",color:txForm.type==="expense"?"#eeeaf4":"#44445a",fontSize:12,fontWeight:600,textTransform:"uppercase"}} onClick={()=>setTxForm(f=>({...f,type:"expense",category:"food"}))}>💸 Wydatek</button>
                   <button style={{flex:1,padding:"10px 6px",borderRadius:10,background:txForm.type==="income"?"rgba(255,255,255,.1)":"none",color:txForm.type==="income"?"#eeeaf4":"#44445a",fontSize:12,fontWeight:600,textTransform:"uppercase"}} onClick={()=>setTxForm(f=>({...f,type:"income",category:"uop"}))}>💰 Przychód</button>
                 </div>
+
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:12,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>Kategoria</div>
+                  <select className="select-box" value={txForm.category} onChange={e=>setTxForm(f=>({...f,category:e.target.value}))}>
+                    {(txForm.type==="income"?CAT_INCOME:CAT_EXPENSE).map(cat=><option key={cat.id} value={cat.id}>{cat.icon} {cat.label}</option>)}
+                  </select>
+                </div>
+
                 {!editTarget&&(<div style={{display:"flex",gap:8,marginBottom:14}}>
                   <select className="select-box" style={{flex:2}} value={txForm.month} onChange={e=>setTxForm(f=>({...f,month:Number(e.target.value)}))}>
                     {MONTHS_FULL.map((m,i)=><option key={i} value={i}>{m}</option>)}
