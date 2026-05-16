@@ -143,6 +143,26 @@ const monthKey = (y, m) => `${y}-${String(m).padStart(2,"0")}`;
 const getCat = (type, id) => (type==="income"?CAT_INCOME:CAT_EXPENSE).find(c=>c.id===id)||{label:id,icon:"•"};
 
 export default function App() {
+  useEffect(() => {
+  // Rejestracja Service Workera
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js").then((reg) => {
+      console.log("Service Worker zarejestrowany");
+      // Uruchomienie timera
+      reg.active?.postMessage({ type: "START_BACKUP_TIMER" });
+    }).catch(err => console.error("SW error:", err));
+  }
+
+  // Nasłuchiwanie na wiadomości od Service Workera
+  navigator.serviceWorker?.addEventListener("message", (event) => {
+    if (event.data.type === "BACKUP_COMPLETED") {
+      console.log("✅ Auto-backup gotowy!");
+      setBackupStatus(event.data.message);
+      // Opcjonalnie: auto-pobierz plik
+      downloadEncryptedBackup(event.data.encrypted, event.data.filename);
+    }
+  });
+}, []);
   const now = new Date();
   const [tab, setTab] = useState("dashboard");
   const [selYear, setSelYear] = useState(now.getFullYear());
