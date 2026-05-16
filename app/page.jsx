@@ -131,6 +131,7 @@ const CAT_EXPENSE = [
   {id:"other_ex",label:"Inne",icon:"💸"},
 ];
 const GOAL_ICONS = ["🏠","🚗","✈️","💻","📱","🎓","💍","🏖️","🎸","⛵","🏋️","💰"];
+const RECUR_ICONS = ["📄","🏠","💡","🚗","📱","🎬","💊","🛒","🔧","🌐","🏋️","💸"];
 
 const fmt = (n) => new Intl.NumberFormat("pl-PL",{style:"currency",currency:"PLN",minimumFractionDigits:0,maximumFractionDigits:0}).format(n);
 const fmtDec = (n) => new Intl.NumberFormat("pl-PL",{style:"currency",currency:"PLN",minimumFractionDigits:2}).format(n);
@@ -982,6 +983,23 @@ export default function App() {
             {modal==="addRecur" && (
               <>
                 <div className="input-box" style={{marginBottom:12}}><input type="text" placeholder="Nazwa" value={recurForm.label} onChange={e=>setRecurForm(f=>({...f,label:e.target.value}))} style={{flex:1,fontSize:14}}/></div>
+
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:12,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>Kategoria</div>
+                  <select className="select-box" value={recurForm.category} onChange={e=>setRecurForm(f=>({...f,category:e.target.value}))}>
+                    {CAT_EXPENSE.map(cat=><option key={cat.id} value={cat.id}>{cat.icon} {cat.label}</option>)}
+                  </select>
+                </div>
+
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:12,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>Ikona</div>
+                  <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(6,1fr)":"repeat(6,1fr)",gap:6,width:"100%"}}>
+                    {RECUR_ICONS.map(icon=>(
+                      <button key={icon} onClick={()=>setRecurForm(f=>({...f,icon}))} style={{width:"100%",aspectRatio:"1",display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,background:recurForm.icon===icon?"rgba(45,212,191,.2)":"rgba(255,255,255,.04)",border:recurForm.icon===icon?"1px solid rgba(45,212,191,.5)":"1px solid rgba(255,255,255,.1)",fontSize:18,cursor:"pointer",transition:"all .2s"}}>{icon}</button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="input-box" style={{marginBottom:20}}>
                   <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
                   <input type="number" inputMode="decimal" placeholder="Kwota" value={recurForm.amount} onChange={e=>setRecurForm(f=>({...f,amount:e.target.value}))} style={{flex:1,fontSize:18,fontWeight:700,fontFamily:"monospace"}}/>
