@@ -613,6 +613,13 @@ export default function App() {
                   </div>
                   <div style={{textAlign:"right",flexShrink:0}}>
                     <div style={{fontSize:isMobile?14:15,fontWeight:700,color:e.type==="income"?"#4ade80":"#f87171"}}>{e.type==="income"?"+":"-"}{fmt(e.amount)}</div>
+                    {e.type==="income" && cat.isTaxed && (()=>{
+                      const ytdCtx = computeYtdContext(selYear, selMonth);
+                      let netto = null;
+                      if(cat.taxType==="uop") { const r=calcUoP(e.amount,ytdCtx.uopPitBase); if(r) netto=r.netto; }
+                      else if(cat.taxType==="ryczalt12") { const r=calcRyczalt(e.amount,ytdCtx.ryczaltPrzychod); if(r) netto=r.netto; }
+                      return netto!==null ? <div style={{fontSize:10,color:"#4ade80",opacity:.7}}>netto {fmt(netto)}</div> : null;
+                    })()}
                     <div style={{fontSize:9,color:"#2a2a40"}}>{new Date(e.date).toLocaleDateString("pl-PL")}</div>
                   </div>
                   <button onClick={ev=>{ev.stopPropagation();deleteTx(e);}} style={{width:26,height:26,borderRadius:8,background:"rgba(248,113,113,.1)",color:"#f87171",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>×</button>
@@ -959,7 +966,7 @@ export default function App() {
                   <input type="text" placeholder="Notatka (opcjonalnie)" value={txForm.note} onChange={e=>setTxForm(f=>({...f,note:e.target.value}))} style={{flex:1,fontSize:14}}/>
                 </div>
 
-                {(txForm.type==="expense" || (txForm.type==="income" && txForm.category==="jdg")) && (
+                {txForm.type==="income" && (txForm.category==="jdg_ryczalt" || txForm.category==="freelance") && (
                   <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,padding:"10px 12px",background:"rgba(34,211,238,.08)",borderRadius:10}}>
                     <input type="checkbox" checked={txForm.reverseCharge} onChange={e=>setTxForm(f=>({...f,reverseCharge:e.target.checked}))} style={{width:18,height:18,cursor:"pointer"}}/>
                     <label style={{fontSize:13,color:"#22d3ee",cursor:"pointer",flex:1}}>Reverse Charge (RC)</label>
