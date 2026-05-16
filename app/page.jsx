@@ -381,11 +381,15 @@ export default function App() {
   const deleteRecur = (id) => setRecurring(prev=>prev.filter(r=>r.id!==id));
 
   const submitGoal = () => {
-    const target=parseFloat(String(goalForm.target).replace(",","."));
-    const saved=parseFloat(String(goalForm.saved).replace(",","."))||0;
+    const target=parseFloat(String(goalForm.target).replace(",",".").trim())||0;
+    const saved=parseFloat(String(goalForm.saved).replace(",",".").trim())||0;
     if(!target||target<=0||!goalForm.name) return;
-    if(editTarget) { setGoals(prev=>prev.map(g=>g.id===editTarget.id?{...g,...goalForm,target,saved:g.saved}:g)); }
-    else { setGoals(prev=>[...prev,{...goalForm,target,saved,id:Date.now(),history:[]}]); }
+    if(editTarget) { 
+      setGoals(prev=>prev.map(g=>g.id===editTarget.id?{...g,...goalForm,target,saved,id:g.id,history:g.history}:g)); 
+    } else {
+      const newGoal={...goalForm,target,saved:Math.min(saved,target),id:Date.now(),history:saved>0?[{date:new Date().toISOString(),amount:saved}]:[]};
+      setGoals(prev=>[...prev,newGoal]);
+    }
     setModal(null); setEditTarget(null);
     setGoalForm({name:"",icon:"🏠",target:"",saved:"",deadline:""});
   };
@@ -900,10 +904,45 @@ export default function App() {
             {(modal==="addGoal"||modal==="editGoal") && (
               <>
                 <div className="input-box" style={{marginBottom:12}}><input type="text" placeholder="Nazwa celu" value={goalForm.name} onChange={e=>setGoalForm(f=>({...f,name:e.target.value}))} style={{flex:1,fontSize:14}}/></div>
+                
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:12,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>Ikona</div>
+                  <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(6,1fr)":"repeat(4,1fr)",gap:6,width:"100%"}}>
+                    {GOAL_ICONS.map(icon=>(
+                      <button
+                        key={icon}
+                        onClick={() => setGoalForm(f=>({...f,icon}))}
+                        style={{
+                          width:"100%",
+                          aspectRatio:"1",
+                          display:"flex",
+                          alignItems:"center",
+                          justifyContent:"center",
+                          borderRadius:10,
+                          background:goalForm.icon===icon?"rgba(245,158,11,.2)":"rgba(255,255,255,.04)",
+                          border:goalForm.icon===icon?"1px solid rgba(245,158,11,.5)":"1px solid rgba(255,255,255,.1)",
+                          color:"#eeeaf4",
+                          fontSize:isMobile?18:20,
+                          cursor:"pointer",
+                          transition:"all .2s"
+                        }}
+                      >
+                        {icon}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="input-box" style={{marginBottom:12}}>
                   <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
-                  <input type="number" inputMode="decimal" placeholder="Docelowo" value={goalForm.target} onChange={e=>setGoalForm(f=>({...f,target:e.target.value}))} style={{flex:1,fontSize:18,fontWeight:700,fontFamily:"monospace"}}/>
+                  <input type="number" inputMode="decimal" placeholder="Cel (całkowita kwota)" value={goalForm.target} onChange={e=>setGoalForm(f=>({...f,target:e.target.value}))} style={{flex:1,fontSize:18,fontWeight:700,fontFamily:"monospace"}}/>
                 </div>
+
+                <div className="input-box" style={{marginBottom:14}}>
+                  <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
+                  <input type="number" inputMode="decimal" placeholder="Już odłożone" value={goalForm.saved} onChange={e=>setGoalForm(f=>({...f,saved:e.target.value}))} style={{flex:1,fontSize:18,fontWeight:700,fontFamily:"monospace"}}/>
+                </div>
+
                 <button className="btn-primary" onClick={submitGoal} style={{background:"linear-gradient(135deg,#f59e0b,#fbbf24)",color:"#000"}}>{editTarget?"Zapisz":"Utwórz"}</button>
               </>
             )}
