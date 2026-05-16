@@ -1000,10 +1000,23 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="input-box" style={{marginBottom:20}}>
+                <div className="input-box" style={{marginBottom:14}}>
                   <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
                   <input type="number" inputMode="decimal" placeholder="Kwota" value={recurForm.amount} onChange={e=>setRecurForm(f=>({...f,amount:e.target.value}))} style={{flex:1,fontSize:18,fontWeight:700,fontFamily:"monospace"}}/>
                 </div>
+
+                <div style={{marginBottom:20}}>
+                  <div style={{fontSize:12,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>Data rozpoczęcia</div>
+                  <div style={{display:"flex",gap:8}}>
+                    <select className="select-box" style={{flex:2}} value={recurForm.startMonth} onChange={e=>setRecurForm(f=>({...f,startMonth:Number(e.target.value)}))}>
+                      {MONTHS_FULL.map((m,i)=><option key={i} value={i}>{m}</option>)}
+                    </select>
+                    <select className="select-box" style={{flex:1}} value={recurForm.startYear} onChange={e=>setRecurForm(f=>({...f,startYear:Number(e.target.value)}))}>
+                      {YEARS.map(y=><option key={y} value={y}>{y}</option>)}
+                    </select>
+                  </div>
+                </div>
+
                 <button className="btn-primary" onClick={submitRecur} style={{background:"linear-gradient(135deg,#2dd4bf,#14b8a6)"}}>{editTarget?"Zapisz":"Dodaj"}</button>
               </>
             )}
