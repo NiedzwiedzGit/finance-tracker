@@ -588,9 +588,9 @@ export default function App() {
         .select-box{background:rgba(255,255,255,.05);border-radius:14px;padding:14px 16px;border:1px solid rgba(255,255,255,.08);width:100%;color:#eeeaf4;font-size:14px;-webkit-appearance:none;appearance:none;}
         .btn-primary{width:100%;padding:17px;border-radius:16px;font-size:15px;font-weight:700;letter-spacing:.02em;color:#fff;transition:all .15s;}
         .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);z-index:200;display:flex;align-items:center;justify-content:center;}
-        .modal{background:#111119;border-radius:20px;width:95%;max-width:500px;max-height:90vh;overflow-y:auto;padding:24px;border:1px solid rgba(255,255,255,.08);}
+        .modal{background:#111119;border-radius:20px;width:95%;max-width:500px;max-height:90vh;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:24px;border:1px solid rgba(255,255,255,.08);}
         @media(max-width:767px){
-          .modal{width:100%;border-radius:28px 28px 0 0;position:fixed;bottom:0;max-height:90vh;}
+          .modal{width:100%;border-radius:28px 28px 0 0;position:fixed;bottom:0;max-height:85vh;overflow-y:scroll;-webkit-overflow-scrolling:touch;}
         }
         .drag-handle{width:40px;height:4px;background:rgba(255,255,255,.15);border-radius:2px;margin:0 auto 20px;}
       `}</style>
@@ -766,45 +766,7 @@ export default function App() {
             <div style={{display:"flex",gap:6,marginBottom:20}}>
               {YEARS.map(y=><button key={y} onClick={()=>setSelYear(y)} style={{padding:"8px 14px",borderRadius:10,background:selYear===y?"rgba(167,139,250,.15)":"rgba(255,255,255,.04)",color:selYear===y?"#a78bfa":"#666",fontSize:12,fontWeight:600}}>{y}</button>)}
             </div>
-            <div className="card" style={{padding:"20px",marginBottom:20}}>
-              <div style={{fontSize:isMobile?12:14,color:"#a78bfa",textTransform:"uppercase",letterSpacing:".1em",marginBottom:16}}>Rok {selYear}</div>
-              <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12,marginBottom:16}}>
-                <div style={{background:"rgba(167,139,250,.06)",borderRadius:13,padding:"14px"}}>
-                  <div style={{fontSize:10,color:"#888",textTransform:"uppercase",marginBottom:8}}>Podatki</div>
-                  <div className="amber" style={{fontSize:isMobile?18:22,fontWeight:800,fontFamily:"monospace"}}>{fmt(yearTax.totalTax)}</div>
-                </div>
-                <div style={{background:"rgba(167,139,250,.06)",borderRadius:13,padding:"14px"}}>
-                  <div style={{fontSize:10,color:"#888",textTransform:"uppercase",marginBottom:8}}>Składki</div>
-                  <div className="violet" style={{fontSize:isMobile?18:22,fontWeight:800,fontFamily:"monospace"}}>{fmt(yearTax.totalSkladki)}</div>
-                </div>
-              </div>
-              {yearTax.totalUopBrutto>0 && (
-                <div style={{marginBottom:14,padding:"14px",background:"rgba(0,0,0,.3)",borderRadius:13}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}><span>💼</span><span style={{fontSize:13,fontWeight:600}}>Umowa o pracę</span></div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:"4px 12px",fontSize:isMobile?11:12}}>
-                    <div style={{color:"#888"}}>Brutto</div><div style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalUopBrutto)}</div>
-                    <div style={{color:"#888"}}>ZUS społeczne</div><div className="violet" style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalUopZus)}</div>
-                    <div style={{color:"#888"}}>Zdrowotna</div><div className="violet" style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalUopZdrow)}</div>
-                    <div style={{color:"#888"}}>PIT</div><div className="amber" style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalUopPit)}</div>
-                    <div style={{color:"#4ade80",fontWeight:600}}>Na rękę</div><div className="green" style={{fontFamily:"monospace",fontWeight:700,textAlign:"right"}}>{fmtDec(yearTax.totalUopNetto)}</div>
-                  </div>
-                </div>
-              )}
-              {yearTax.totalJdgPrzychod>0 && (
-                <div style={{padding:"14px",background:"rgba(0,0,0,.3)",borderRadius:13}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}><span>📈</span><span style={{fontSize:13,fontWeight:600}}>JDG – ryczałt 12%</span></div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:"4px 12px",fontSize:isMobile?11:12}}>
-                    <div style={{color:"#888"}}>Przychód</div><div style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalJdgPrzychod)}</div>
-                    <div style={{color:"#888"}}>Zdrowotna</div><div className="violet" style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalJdgZdrow)}</div>
-                    <div style={{color:"#888"}}>Ryczałt 12%</div><div className="amber" style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalJdgRyczalt)}</div>
-                    <div style={{color:"#4ade80",fontWeight:600}}>Na rękę</div><div className="green" style={{fontFamily:"monospace",fontWeight:700,textAlign:"right"}}>{fmtDec(yearTax.totalJdgNetto)}</div>
-                  </div>
-                  <div style={{marginTop:10,padding:"8px 12px",background:"rgba(74,222,128,.06)",borderRadius:10,fontSize:11,color:"#4ade80"}}>✓ Zwolniony z ZUS</div>
-                </div>
-              )}
-            </div>
-
-            {/* II PRÓG PODATKOWY */}
+            {/* II PRÓG PODATKOWY - na górze żeby było od razu widoczne */}
             <div className="card" style={{padding:"20px",marginBottom:20}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:10}}>
                 <div>
@@ -840,7 +802,6 @@ export default function App() {
                 </div>
               )}
 
-              {/* Pasek postępu */}
               <div style={{marginBottom:12}}>
                 <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#44445a",marginBottom:6}}>
                   <span>{jointFiling?"Łączna podstawa (suma)":"Twoja podstawa (szac. roczna)"}</span>
@@ -886,17 +847,17 @@ export default function App() {
                 <div style={{padding:"12px 14px",background:"rgba(248,113,113,.08)",borderRadius:12,border:"1px solid rgba(248,113,113,.2)",fontSize:isMobile?12:13,color:"#f87171",display:"flex",alignItems:"center",gap:8}}>
                   <span style={{fontSize:18}}>⚠️</span>
                   <div>
-                    <div style={{fontWeight:600,marginBottom:2}}>II próg podatkowy aktywny {thresholdInfo.crossedMonth !== null ? `od ${MONTHS_FULL[thresholdInfo.crossedMonth]}` : ""}!</div>
+                    <div style={{fontWeight:600,marginBottom:2}}>II próg aktywny {thresholdInfo.crossedMonth !== null ? `od ${MONTHS_FULL[thresholdInfo.crossedMonth]}` : ""}!</div>
                     <div style={{fontSize:11,opacity:.8}}>Nadwyżka ponad {fmt(thresholdInfo.effectiveThreshold)} opodatkowana stawką 32%.</div>
-                    {jointFiling && <div style={{fontSize:11,opacity:.8,marginTop:2}}>Rozliczenie wspólne może obniżyć podatek – skonsultuj z księgowym.</div>}
+                    {jointFiling && <div style={{fontSize:11,opacity:.8,marginTop:2}}>Rozliczenie wspólne może obniżyć podatek.</div>}
                   </div>
                 </div>
               ) : thresholdInfo.estCrossMonth !== null ? (
                 <div style={{padding:"12px 14px",background:"rgba(251,191,36,.08)",borderRadius:12,border:"1px solid rgba(251,191,36,.2)",fontSize:isMobile?12:13,color:"#fbbf24",display:"flex",alignItems:"center",gap:8}}>
                   <span style={{fontSize:18}}>🔔</span>
                   <div>
-                    <div style={{fontWeight:600,marginBottom:2}}>Szacowane przekroczenie: <span style={{color:"#fff"}}>{MONTHS_FULL[thresholdInfo.estCrossMonth]} {selYear}</span></div>
-                    <div style={{fontSize:11,opacity:.8}}>Na podstawie średniej miesięcznej podstawy {fmt(thresholdInfo.avgMonthly)}{jointFiling&&thresholdInfo.avgMonthlySpouse>0?` + ${fmt(thresholdInfo.avgMonthlySpouse)} (żona)`:""}</div>
+                    <div style={{fontWeight:600,marginBottom:2}}>Szac. przekroczenie: <span style={{color:"#fff"}}>{MONTHS_FULL[thresholdInfo.estCrossMonth]} {selYear}</span></div>
+                    <div style={{fontSize:11,opacity:.8}}>Śr. miesięczna podstawa: {fmt(thresholdInfo.avgMonthly)}{jointFiling&&thresholdInfo.avgMonthlySpouse>0?` + ${fmt(thresholdInfo.avgMonthlySpouse)} (żona)`:""}</div>
                   </div>
                 </div>
               ) : yearTax.totalUopBrutto === 0 ? (
@@ -914,9 +875,48 @@ export default function App() {
               )}
 
               <div style={{marginTop:14,padding:"10px 12px",background:"rgba(255,255,255,.03)",borderRadius:10,fontSize:10,color:"#2a2a40",lineHeight:1.6}}>
-                <span style={{color:"#44445a"}}>💡 <strong>Jak to działa:</strong></span> Przy rozliczeniu {jointFiling?"<strong>wspólnym</strong>, suma dochodów dzielona jest przez 2 – efektywny próg to 240 000 PLN łącznie.":"<strong>indywidualnym</strong>, próg wynosi 120 000 PLN Twojej podstawy."} II próg (32%) stosowany jest do nadwyżki. Podstawa = brutto − ZUS − koszty uzysk. (250 PLN/mies.)
+                <span style={{color:"#44445a"}}>💡 <strong>Jak to działa:</strong></span> Przy rozliczeniu {jointFiling?"wspólnym, suma dochodów dzielona jest przez 2 – efektywny próg to 240 000 PLN łącznie.":"indywidualnym, próg wynosi 120 000 PLN Twojej podstawy."} II próg (32%) stosowany jest do nadwyżki.
               </div>
             </div>
+
+            <div className="card" style={{padding:"20px",marginBottom:20}}>
+              <div style={{fontSize:isMobile?12:14,color:"#a78bfa",textTransform:"uppercase",letterSpacing:".1em",marginBottom:16}}>Rok {selYear}</div>
+              <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12,marginBottom:16}}>
+                <div style={{background:"rgba(167,139,250,.06)",borderRadius:13,padding:"14px"}}>
+                  <div style={{fontSize:10,color:"#888",textTransform:"uppercase",marginBottom:8}}>Podatki</div>
+                  <div className="amber" style={{fontSize:isMobile?18:22,fontWeight:800,fontFamily:"monospace"}}>{fmt(yearTax.totalTax)}</div>
+                </div>
+                <div style={{background:"rgba(167,139,250,.06)",borderRadius:13,padding:"14px"}}>
+                  <div style={{fontSize:10,color:"#888",textTransform:"uppercase",marginBottom:8}}>Składki</div>
+                  <div className="violet" style={{fontSize:isMobile?18:22,fontWeight:800,fontFamily:"monospace"}}>{fmt(yearTax.totalSkladki)}</div>
+                </div>
+              </div>
+              {yearTax.totalUopBrutto>0 && (
+                <div style={{marginBottom:14,padding:"14px",background:"rgba(0,0,0,.3)",borderRadius:13}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}><span>💼</span><span style={{fontSize:13,fontWeight:600}}>Umowa o pracę</span></div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:"4px 12px",fontSize:isMobile?11:12}}>
+                    <div style={{color:"#888"}}>Brutto</div><div style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalUopBrutto)}</div>
+                    <div style={{color:"#888"}}>ZUS społeczne</div><div className="violet" style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalUopZus)}</div>
+                    <div style={{color:"#888"}}>Zdrowotna</div><div className="violet" style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalUopZdrow)}</div>
+                    <div style={{color:"#888"}}>PIT</div><div className="amber" style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalUopPit)}</div>
+                    <div style={{color:"#4ade80",fontWeight:600}}>Na rękę</div><div className="green" style={{fontFamily:"monospace",fontWeight:700,textAlign:"right"}}>{fmtDec(yearTax.totalUopNetto)}</div>
+                  </div>
+                </div>
+              )}
+              {yearTax.totalJdgPrzychod>0 && (
+                <div style={{padding:"14px",background:"rgba(0,0,0,.3)",borderRadius:13}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}><span>📈</span><span style={{fontSize:13,fontWeight:600}}>JDG – ryczałt 12%</span></div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:"4px 12px",fontSize:isMobile?11:12}}>
+                    <div style={{color:"#888"}}>Przychód</div><div style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalJdgPrzychod)}</div>
+                    <div style={{color:"#888"}}>Zdrowotna</div><div className="violet" style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalJdgZdrow)}</div>
+                    <div style={{color:"#888"}}>Ryczałt 12%</div><div className="amber" style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalJdgRyczalt)}</div>
+                    <div style={{color:"#4ade80",fontWeight:600}}>Na rękę</div><div className="green" style={{fontFamily:"monospace",fontWeight:700,textAlign:"right"}}>{fmtDec(yearTax.totalJdgNetto)}</div>
+                  </div>
+                  <div style={{marginTop:10,padding:"8px 12px",background:"rgba(74,222,128,.06)",borderRadius:10,fontSize:11,color:"#4ade80"}}>✓ Zwolniony z ZUS</div>
+                </div>
+              )}
+            </div>
+
           </div>
         )}
 
@@ -1163,10 +1163,6 @@ export default function App() {
                     {YEARS.map(y=><option key={y} value={y}>{y}</option>)}
                   </select>
                 </div>)}
-                <div className="input-box" style={{marginBottom:6}}>
-                  <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
-                  <input type="number" inputMode="decimal" placeholder="0,00" value={txForm.amount} onChange={e=>setTxForm(f=>({...f,amount:e.target.value}))} style={{flex:1,fontSize:isMobile?20:26,fontWeight:700,fontFamily:"monospace"}}/>
-                </div>
 
                 {txForm.type==="income" && txForm.amount && CAT_INCOME.find(c=>c.id===txForm.category)?.isTaxed && (()=>{
                   const ytd = computeYtdContext(txForm.year, txForm.month);
@@ -1219,6 +1215,11 @@ export default function App() {
                     </div>
                   );
                 })()}
+
+                <div className="input-box" style={{marginBottom:6}}>
+                  <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
+                  <input type="number" inputMode="decimal" placeholder="0,00" value={txForm.amount} onChange={e=>setTxForm(f=>({...f,amount:e.target.value}))} style={{flex:1,fontSize:isMobile?20:26,fontWeight:700,fontFamily:"monospace"}}/>
+                </div>
 
                 <div className="input-box" style={{marginBottom:20}}>
                   <input type="text" placeholder="Notatka (opcjonalnie)" value={txForm.note} onChange={e=>setTxForm(f=>({...f,note:e.target.value}))} style={{flex:1,fontSize:14}}/>
