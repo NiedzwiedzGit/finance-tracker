@@ -158,6 +158,8 @@ export default function App() {
   const [recurForm, setRecurForm] = useState({label:"",amount:"",category:"bills",icon:"📄",startYear:now.getFullYear(),startMonth:now.getMonth()});
   const [goalForm, setGoalForm] = useState({name:"",icon:"🏠",target:"",saved:"",deadline:""});
   const [savingForm, setSavingForm] = useState({goalId:"",amount:"",sourceIncome:"other_in"});
+  const [jointFiling, setJointFiling] = useState(() => load("fin3_joint_filing", false));
+  const [spouseMonthlyBrutto, setSpouseMonthlyBrutto] = useState(() => load("fin3_spouse_brutto", ""));
   const [backupPassword, setBackupPassword] = useState(() => load("fin3_backup_pwd", ""));
   const [backupStatus, setBackupStatus] = useState("");
   const [backupLoading, setBackupLoading] = useState(false);
@@ -179,6 +181,8 @@ export default function App() {
   useEffect(() => save("fin3_recur", recurring), [recurring]);
   useEffect(() => save("fin3_goals", goals), [goals]);
   useEffect(() => save("fin3_backup_pwd", backupPassword), [backupPassword]);
+  useEffect(() => save("fin3_joint_filing", jointFiling), [jointFiling]);
+  useEffect(() => save("fin3_spouse_brutto", spouseMonthlyBrutto), [spouseMonthlyBrutto]);
 
   useEffect(() => {
     if (backupPassword && isBackupDue()) {
@@ -324,6 +328,126 @@ export default function App() {
     return { totalUopBrutto,totalUopNetto,totalUopZus,totalUopZdrow,totalUopPit, totalJdgPrzychod,totalJdgNetto,totalJdgZdrow,totalJdgRyczalt, totalTax:totalUopPit+totalJdgRyczalt, totalSkladki:totalUopZus+totalUopZdrow+totalJdgZdrow };
   };
   const yearTax = computeYearTax(selYear);
+
+  // Obliczenia II progu podatkowego (120 000 PLN podstawy opodatkowania)
+  const computeSecondThresholdInfo = (year, jointFiling, spouseMonthlyBruttoVal) => {
+    const T = TAX_2026;
+    // Naliczamy miesięczną podstawę UoP dla każdego miesiąca roku
+    let monthlyBases = [];
+    let cumBase = 0;
+    let uopPitBaseSoFar = 0;
+    let crossedMonth = null;
+    for (let m = 0; m < 12; m++) {
+      const ents = getMonthEntries(year, m);
+      let monthBase = 0;
+      ents.filter(e => e.type === "income").forEach(e => {
+        const cat = getCat("income", e.category);
+        if (cat.taxType === "uop") {
+          const r = calcUoP(e.amount, uopPitBaseSoFar);
+          if (r) { monthBase += r.pitBase; uopPitBaseSoFar += r.pitBase; }
+        }
+      });
+      cumBase += monthBase;
+      monthlyBases.push({ m, monthBase, cumBase });
+    }
+    const currentMonth = now.getFullYear() === year ? now.getMonth() : 11;
+    const ytdBase = monthlyBases[currentMonth]?.cumBase ?? 0;
+
+    // Podstawa małżonka: szacunkowa roczna na podstawie miesięcznego brutto
+    let spouseAnnualBase = 0;
+    const spouseBrutto = parseFloat(String(spouseMonthlyBruttoVal).replace(",", ".")) || 0;
+    if (jointFiling && spouseBrutto > 0) {
+      // Uproszczenie: liczymy bazę małżonka jako brutto - ZUS_społ - KUP_base * 12
+      const spouseZus = spouseBrutto * (T.ZUS_EMERY + T.ZUS_RENT + T.ZUS_CHOR);
+      const spouseMonthBase = Math.max(0, spouseBrutto - spouseZus - T.KUP_BASE);
+      spouseAnnualBase = spouseMonthBase * 12;
+    }
+
+    const THRESHOLD = T.PIT_THRESHOLD; // 120 000
+
+    if (jointFiling) {
+      // Przy wspólnym rozliczeniu: (twój_dochód + dochód_małżonka) / 2 musi przekroczyć 120 000
+      // Efektywny próg dla sumy: 240 000 PLN
+      const effectiveThreshold = THRESHOLD * 2;
+      const yearlyBase = monthlyBases[11]?.cumBase ?? 0; // przewidywana na cały rok
+      const combinedYtd = ytdBase + spouseAnnualBase * (currentMonth + 1) / 12;
+      const combinedYearly = yearlyBase + spouseAnnualBase;
+      const remaining = Math.max(0, effectiveThreshold - combinedYearly);
+      const avgMonthly = monthlyBases.filter(x => x.monthBase > 0).reduce((s, x) => s + x.monthBase, 0) /
+        Math.max(1, monthlyBases.filter(x => x.monthBase > 0).length);
+      const avgMonthlySpouse = spouseAnnualBase / 12;
+      const avgCombinedMonthly = avgMonthly + avgMonthlySpouse;
+      // Szacowany miesiąc przekroczenia progu
+      let estCrossMonth = null;
+      if (combinedYtd < effectiveThreshold && avgCombinedMonthly > 0) {
+        let acc = combinedYtd;
+        for (let m = currentMonth + 1; m < 12; m++) {
+          acc += avgCombinedMonthly;
+          if (acc >= effectiveThreshold) { estCrossMonth = m; break; }
+        }
+      }
+      // Czy już przekroczono w roku
+      const alreadyCrossed = combinedYearly >= effectiveThreshold;
+      // Miesiąc rzeczywistego przekroczenia
+      let actualCrossMonth = null;
+      if (alreadyCrossed) {
+        let acc = 0;
+        for (const { m, cumBase: cb } of monthlyBases) {
+          const combinedMonth = cb + spouseAnnualBase * (m + 1) / 12;
+          if (combinedMonth >= effectiveThreshold) { actualCrossMonth = m; break; }
+        }
+      }
+      return {
+        jointFiling: true,
+        yourYtdBase: ytdBase,
+        yourYearlyBase: yearlyBase,
+        spouseAnnualBase,
+        combinedYearly,
+        effectiveThreshold,
+        remaining,
+        alreadyCrossed,
+        crossedMonth: actualCrossMonth,
+        estCrossMonth,
+        avgMonthly,
+        avgMonthlySpouse,
+        pctUsed: Math.min(100, (combinedYearly / effectiveThreshold) * 100),
+      };
+    } else {
+      // Rozliczenie indywidualne
+      const yearlyBase = monthlyBases[11]?.cumBase ?? 0;
+      const remaining = Math.max(0, THRESHOLD - yearlyBase);
+      const avgMonthly = monthlyBases.filter(x => x.monthBase > 0).reduce((s, x) => s + x.monthBase, 0) /
+        Math.max(1, monthlyBases.filter(x => x.monthBase > 0).length);
+      let estCrossMonth = null;
+      if (ytdBase < THRESHOLD && avgMonthly > 0) {
+        let acc = ytdBase;
+        for (let m = currentMonth + 1; m < 12; m++) {
+          acc += avgMonthly;
+          if (acc >= THRESHOLD) { estCrossMonth = m; break; }
+        }
+      }
+      const alreadyCrossed = yearlyBase >= THRESHOLD;
+      let actualCrossMonth = null;
+      if (alreadyCrossed) {
+        for (const { m, cumBase: cb } of monthlyBases) {
+          if (cb >= THRESHOLD) { actualCrossMonth = m; break; }
+        }
+      }
+      return {
+        jointFiling: false,
+        yourYtdBase: ytdBase,
+        yourYearlyBase: yearlyBase,
+        effectiveThreshold: THRESHOLD,
+        remaining,
+        alreadyCrossed,
+        crossedMonth: actualCrossMonth,
+        estCrossMonth,
+        avgMonthly,
+        pctUsed: Math.min(100, (yearlyBase / THRESHOLD) * 100),
+      };
+    }
+  };
+  const thresholdInfo = computeSecondThresholdInfo(selYear, jointFiling, spouseMonthlyBrutto);
 
   const computeForecast = () => {
     let pitSum=0,ryczaltSum=0,monthsCount=0;
@@ -678,6 +802,120 @@ export default function App() {
                   <div style={{marginTop:10,padding:"8px 12px",background:"rgba(74,222,128,.06)",borderRadius:10,fontSize:11,color:"#4ade80"}}>✓ Zwolniony z ZUS</div>
                 </div>
               )}
+            </div>
+
+            {/* II PRÓG PODATKOWY */}
+            <div className="card" style={{padding:"20px",marginBottom:20}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:10}}>
+                <div>
+                  <div style={{fontSize:isMobile?12:14,color:"#fbbf24",textTransform:"uppercase",letterSpacing:".1em",marginBottom:4}}>II próg podatkowy</div>
+                  <div style={{fontSize:isMobile?10:12,color:"#44445a"}}>Próg: {fmt(thresholdInfo.effectiveThreshold)} podstawy opodatkowania</div>
+                </div>
+                <button
+                  onClick={()=>setJointFiling(j=>!j)}
+                  style={{padding:"8px 14px",borderRadius:12,background:jointFiling?"rgba(167,139,250,.2)":"rgba(255,255,255,.06)",border:jointFiling?"1px solid rgba(167,139,250,.4)":"1px solid rgba(255,255,255,.1)",color:jointFiling?"#a78bfa":"#666",fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:6}}
+                >
+                  <span>{jointFiling?"💑":"👤"}</span>
+                  <span>{jointFiling?"Wspólne z żoną":"Solo"}</span>
+                </button>
+              </div>
+
+              {jointFiling && (
+                <div style={{marginBottom:16,padding:"12px 14px",background:"rgba(167,139,250,.08)",borderRadius:12,border:"1px solid rgba(167,139,250,.15)"}}>
+                  <div style={{fontSize:11,color:"#a78bfa",textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>Miesięczne brutto żony (UoP)</div>
+                  <div className="input-box" style={{padding:"10px 14px"}}>
+                    <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      placeholder="0"
+                      value={spouseMonthlyBrutto}
+                      onChange={e=>setSpouseMonthlyBrutto(e.target.value)}
+                      style={{flex:1,fontSize:16,fontWeight:600,fontFamily:"monospace"}}
+                    />
+                  </div>
+                  {thresholdInfo.spouseAnnualBase > 0 && (
+                    <div style={{marginTop:8,fontSize:11,color:"#44445a"}}>Szacowana roczna podstawa żony: <span style={{color:"#a78bfa",fontFamily:"monospace"}}>{fmtDec(thresholdInfo.spouseAnnualBase)}</span></div>
+                  )}
+                </div>
+              )}
+
+              {/* Pasek postępu */}
+              <div style={{marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#44445a",marginBottom:6}}>
+                  <span>{jointFiling?"Łączna podstawa (suma)":"Twoja podstawa (szac. roczna)"}</span>
+                  <span style={{fontFamily:"monospace",color:thresholdInfo.alreadyCrossed?"#f87171":"#fbbf24"}}>{Math.round(thresholdInfo.pctUsed)}%</span>
+                </div>
+                <div style={{height:10,background:"rgba(255,255,255,.06)",borderRadius:999,overflow:"hidden"}}>
+                  <div style={{
+                    width:`${thresholdInfo.pctUsed}%`,
+                    height:"100%",
+                    background:thresholdInfo.alreadyCrossed
+                      ?"linear-gradient(135deg,#f87171,#ef4444)"
+                      :thresholdInfo.pctUsed>75
+                        ?"linear-gradient(135deg,#fbbf24,#f59e0b)"
+                        :"linear-gradient(135deg,#4ade80,#22c55e)",
+                    borderRadius:999,
+                    transition:"width .5s ease"
+                  }}/>
+                </div>
+              </div>
+
+              <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"1fr 1fr 1fr",gap:10,marginBottom:16}}>
+                <div style={{background:"rgba(0,0,0,.3)",borderRadius:12,padding:"12px 10px",textAlign:"center"}}>
+                  <div style={{fontSize:9,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:4}}>
+                    {jointFiling?"Twoja (szac.)":"Twoja podstawa"}
+                  </div>
+                  <div style={{fontSize:isMobile?13:15,fontWeight:700,color:"#7dd3fc",fontFamily:"monospace"}}>{fmtDec(thresholdInfo.yourYearlyBase)}</div>
+                </div>
+                {jointFiling && (
+                  <div style={{background:"rgba(0,0,0,.3)",borderRadius:12,padding:"12px 10px",textAlign:"center"}}>
+                    <div style={{fontSize:9,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:4}}>Żona (szac.)</div>
+                    <div style={{fontSize:isMobile?13:15,fontWeight:700,color:"#a78bfa",fontFamily:"monospace"}}>{fmtDec(thresholdInfo.spouseAnnualBase)}</div>
+                  </div>
+                )}
+                <div style={{background:"rgba(0,0,0,.3)",borderRadius:12,padding:"12px 10px",textAlign:"center"}}>
+                  <div style={{fontSize:9,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:4}}>Do progu</div>
+                  <div style={{fontSize:isMobile?13:15,fontWeight:700,color:thresholdInfo.alreadyCrossed?"#f87171":"#4ade80",fontFamily:"monospace"}}>
+                    {thresholdInfo.alreadyCrossed?"PRZEKROCZONY":fmtDec(thresholdInfo.remaining)}
+                  </div>
+                </div>
+              </div>
+
+              {thresholdInfo.alreadyCrossed ? (
+                <div style={{padding:"12px 14px",background:"rgba(248,113,113,.08)",borderRadius:12,border:"1px solid rgba(248,113,113,.2)",fontSize:isMobile?12:13,color:"#f87171",display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:18}}>⚠️</span>
+                  <div>
+                    <div style={{fontWeight:600,marginBottom:2}}>II próg podatkowy aktywny {thresholdInfo.crossedMonth !== null ? `od ${MONTHS_FULL[thresholdInfo.crossedMonth]}` : ""}!</div>
+                    <div style={{fontSize:11,opacity:.8}}>Nadwyżka ponad {fmt(thresholdInfo.effectiveThreshold)} opodatkowana stawką 32%.</div>
+                    {jointFiling && <div style={{fontSize:11,opacity:.8,marginTop:2}}>Rozliczenie wspólne może obniżyć podatek – skonsultuj z księgowym.</div>}
+                  </div>
+                </div>
+              ) : thresholdInfo.estCrossMonth !== null ? (
+                <div style={{padding:"12px 14px",background:"rgba(251,191,36,.08)",borderRadius:12,border:"1px solid rgba(251,191,36,.2)",fontSize:isMobile?12:13,color:"#fbbf24",display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:18}}>🔔</span>
+                  <div>
+                    <div style={{fontWeight:600,marginBottom:2}}>Szacowane przekroczenie: <span style={{color:"#fff"}}>{MONTHS_FULL[thresholdInfo.estCrossMonth]} {selYear}</span></div>
+                    <div style={{fontSize:11,opacity:.8}}>Na podstawie średniej miesięcznej podstawy {fmt(thresholdInfo.avgMonthly)}{jointFiling&&thresholdInfo.avgMonthlySpouse>0?` + ${fmt(thresholdInfo.avgMonthlySpouse)} (żona)`:""}</div>
+                  </div>
+                </div>
+              ) : yearTax.totalUopBrutto === 0 ? (
+                <div style={{padding:"12px 14px",background:"rgba(255,255,255,.04)",borderRadius:12,fontSize:12,color:"#44445a",textAlign:"center"}}>
+                  Brak danych UoP dla roku {selYear}
+                </div>
+              ) : (
+                <div style={{padding:"12px 14px",background:"rgba(74,222,128,.06)",borderRadius:12,border:"1px solid rgba(74,222,128,.15)",fontSize:isMobile?12:13,color:"#4ade80",display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:18}}>✅</span>
+                  <div>
+                    <div style={{fontWeight:600,marginBottom:2}}>Bezpieczna strefa – brak ryzyka II progu w {selYear}</div>
+                    <div style={{fontSize:11,opacity:.8}}>Szacowana podstawa nie przekroczy {fmt(thresholdInfo.effectiveThreshold)}</div>
+                  </div>
+                </div>
+              )}
+
+              <div style={{marginTop:14,padding:"10px 12px",background:"rgba(255,255,255,.03)",borderRadius:10,fontSize:10,color:"#2a2a40",lineHeight:1.6}}>
+                <span style={{color:"#44445a"}}>💡 <strong>Jak to działa:</strong></span> Przy rozliczeniu {jointFiling?"<strong>wspólnym</strong>, suma dochodów dzielona jest przez 2 – efektywny próg to 240 000 PLN łącznie.":"<strong>indywidualnym</strong>, próg wynosi 120 000 PLN Twojej podstawy."} II próg (32%) stosowany jest do nadwyżki. Podstawa = brutto − ZUS − koszty uzysk. (250 PLN/mies.)
+              </div>
             </div>
           </div>
         )}
