@@ -449,6 +449,78 @@ export default function App() {
   };
   const thresholdInfo = computeSecondThresholdInfo(selYear, jointFiling, spouseMonthlyBrutto);
 
+  // Roczne rozliczenie PIT – dopłata lub zwrot
+  const computeAnnualSettlement = (year, jointFiling, spouseMonthlyBruttoVal) => {
+    const T = TAX_2026;
+    let annualUopPitBase = 0;
+    let annualUopAdvances = 0; // suma zaliczek pobranych miesięcznie
+    for (let m = 0; m < 12; m++) {
+      const s = computeMonthSummary(year, m);
+      annualUopPitBase += s.ytd ? 0 : 0; // nie używamy ytd tutaj
+    }
+    // Przelicz sumę podstaw i zaliczek bezpośrednio
+    let uopPitBaseSoFar = 0;
+    for (let m = 0; m < 12; m++) {
+      const ents = getMonthEntries(year, m);
+      ents.filter(e => e.type === "income").forEach(e => {
+        const cat = getCat("income", e.category);
+        if (cat.taxType === "uop") {
+          const r = calcUoP(e.amount, uopPitBaseSoFar);
+          if (r) {
+            annualUopPitBase += r.pitBase;
+            annualUopAdvances += r.pit;
+            uopPitBaseSoFar += r.pitBase;
+          }
+        }
+      });
+    }
+    if (annualUopPitBase === 0) return null;
+
+    // Podatek należny roczny wg skali – obliczanie ROCZNE (bez miesięcznych redukcji)
+    const calcAnnualTax = (base) => {
+      if (base <= 0) return 0;
+      const wolna = T.PIT_FREE; // 30 000
+      const taxableBase = Math.max(0, base - wolna);
+      if (taxableBase <= 0) return 0;
+      if (taxableBase <= T.PIT_THRESHOLD) {
+        // 12% - 3600 (kwota zmniejszająca = 30 000 * 12%)
+        return Math.max(0, taxableBase * T.PIT_RATE_1 - 3600);
+      } else {
+        return Math.max(0, T.PIT_THRESHOLD * T.PIT_RATE_1 - 3600 + (taxableBase - T.PIT_THRESHOLD) * T.PIT_RATE_2);
+      }
+    };
+
+    let taxDue;
+    let note = "";
+    if (jointFiling) {
+      const spouseBrutto = parseFloat(String(spouseMonthlyBruttoVal).replace(",", ".")) || 0;
+      let spouseAnnualBase = 0;
+      if (spouseBrutto > 0) {
+        const spouseZus = spouseBrutto * (T.ZUS_EMERY + T.ZUS_RENT + T.ZUS_CHOR);
+        spouseAnnualBase = Math.max(0, spouseBrutto - spouseZus - T.KUP_BASE) * 12;
+      }
+      const combined = annualUopPitBase + spouseAnnualBase;
+      taxDue = calcAnnualTax(combined / 2) * 2;
+      note = spouseBrutto > 0
+        ? `Wspólne z żoną (łączna podstawa: ${Math.round(combined).toLocaleString("pl-PL")} PLN)`
+        : "Wspólne z żoną – brak danych podstawy żony";
+    } else {
+      taxDue = calcAnnualTax(annualUopPitBase);
+      note = "Rozliczenie indywidualne";
+    }
+
+    const settlement = annualUopAdvances - taxDue;
+    return {
+      annualUopPitBase,
+      annualUopAdvances: Math.round(annualUopAdvances),
+      taxDue: Math.round(taxDue),
+      settlement: Math.round(settlement), // >0 zwrot, <0 dopłata
+      jointFiling,
+      note,
+    };
+  };
+  const annualSettlement = computeAnnualSettlement(selYear, jointFiling, spouseMonthlyBrutto);
+
   const computeForecast = () => {
     let pitSum=0,ryczaltSum=0,monthsCount=0;
     for (let i=1;i<=3;i++) {
@@ -878,6 +950,45 @@ export default function App() {
                 <span style={{color:"#44445a"}}>💡 <strong>Jak to działa:</strong></span> Przy rozliczeniu {jointFiling?"wspólnym, suma dochodów dzielona jest przez 2 – efektywny próg to 240 000 PLN łącznie.":"indywidualnym, próg wynosi 120 000 PLN Twojej podstawy."} II próg (32%) stosowany jest do nadwyżki.
               </div>
             </div>
+
+            {/* ROCZNE ROZLICZENIE PIT */}
+            {annualSettlement && (
+              <div className="card" style={{padding:"20px",marginBottom:20}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:8}}>
+                  <div>
+                    <div style={{fontSize:isMobile?12:14,color:annualSettlement.settlement>=0?"#4ade80":"#f87171",textTransform:"uppercase",letterSpacing:".1em",marginBottom:4}}>
+                      {annualSettlement.settlement>=0?"Szacowany zwrot PIT":"Szacowana dopłata PIT"}
+                    </div>
+                    <div style={{fontSize:isMobile?10:11,color:"#44445a"}}>{annualSettlement.note}</div>
+                  </div>
+                  <div style={{
+                    fontSize:isMobile?24:32,fontWeight:800,fontFamily:"monospace",
+                    color:annualSettlement.settlement>=0?"#4ade80":"#f87171"
+                  }}>
+                    {annualSettlement.settlement>=0?"+":""}{fmtDec(annualSettlement.settlement)}
+                  </div>
+                </div>
+
+                <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:"6px 16px",fontSize:isMobile?11:12,padding:"14px",background:"rgba(0,0,0,.3)",borderRadius:12,marginBottom:14}}>
+                  <div style={{color:"#888"}}>Roczna podstawa opodatkowania</div>
+                  <div style={{fontFamily:"monospace",fontWeight:600,textAlign:"right",color:"#eeeaf4"}}>{fmtDec(annualSettlement.annualUopPitBase)}</div>
+                  <div style={{color:"#888"}}>Podatek należny (roczny)</div>
+                  <div style={{fontFamily:"monospace",fontWeight:600,textAlign:"right",color:"#fbbf24"}}>{fmtDec(annualSettlement.taxDue)}</div>
+                  <div style={{color:"#888"}}>Zaliczki pobrane w roku</div>
+                  <div style={{fontFamily:"monospace",fontWeight:600,textAlign:"right",color:"#a78bfa"}}>{fmtDec(annualSettlement.annualUopAdvances)}</div>
+                  <div style={{color:annualSettlement.settlement>=0?"#4ade80":"#f87171",fontWeight:700,paddingTop:6,borderTop:"1px solid rgba(255,255,255,.06)"}}>
+                    {annualSettlement.settlement>=0?"Zwrot od US":"Dopłata do US"}
+                  </div>
+                  <div style={{fontFamily:"monospace",fontWeight:800,textAlign:"right",color:annualSettlement.settlement>=0?"#4ade80":"#f87171",paddingTop:6,borderTop:"1px solid rgba(255,255,255,.06)",fontSize:isMobile?13:14}}>
+                    {annualSettlement.settlement>=0?"+":""}{fmtDec(annualSettlement.settlement)}
+                  </div>
+                </div>
+
+                <div style={{padding:"10px 12px",background:"rgba(255,255,255,.03)",borderRadius:10,fontSize:10,color:"#44445a",lineHeight:1.6}}>
+                  💡 <strong style={{color:"#555"}}>Podstawa obliczeń:</strong> Skala podatkowa 2026 — do 120 000 PLN: 12% − 3 600 PLN (kwota wolna 30 000 PLN). Powyżej: 10 800 PLN + 32% nadwyżki.{annualSettlement.jointFiling?" Przy wspólnym rozliczeniu podatek = f(suma/2) × 2.":" Rozliczenie indywidualne."} Wynik jest szacunkowy — nie uwzględnia ulg (np. prorodzinna, internetowa).
+                </div>
+              </div>
+            )}
 
             <div className="card" style={{padding:"20px",marginBottom:20}}>
               <div style={{fontSize:isMobile?12:14,color:"#a78bfa",textTransform:"uppercase",letterSpacing:".1em",marginBottom:16}}>Rok {selYear}</div>
