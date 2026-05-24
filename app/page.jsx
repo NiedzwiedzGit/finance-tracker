@@ -96,10 +96,13 @@ function calcRyczalt(przychod, yearPrzychodSoFar = 0) {
   if (!przychod || przychod <= 0) return null;
   const T = TAX_2026;
   const yearTotal = yearPrzychodSoFar + przychod;
-  let zdrow;
-  if (yearTotal <= T.ZDROW_RYCZALT.THRESHOLD_1) zdrow = T.ZDROW_RYCZALT.AMOUNT_1;
-  else if (yearTotal <= T.ZDROW_RYCZALT.THRESHOLD_2) zdrow = T.ZDROW_RYCZALT.AMOUNT_2;
-  else zdrow = T.ZDROW_RYCZALT.AMOUNT_3;
+  // 3 progi składki zdrowotnej dla ryczałtowca (art. 81 ust. 2 ustawy o świadczeniach opieki zdrowotnej)
+  // Stawka ustalana na podstawie rocznego przychodu z bieżącego roku (kumulatywnie)
+  let zdrow, zdrowTier;
+  if (yearTotal <= T.ZDROW_RYCZALT.THRESHOLD_1) { zdrow = T.ZDROW_RYCZALT.AMOUNT_1; zdrowTier = 1; }
+  else if (yearTotal <= T.ZDROW_RYCZALT.THRESHOLD_2) { zdrow = T.ZDROW_RYCZALT.AMOUNT_2; zdrowTier = 2; }
+  else { zdrow = T.ZDROW_RYCZALT.AMOUNT_3; zdrowTier = 3; }
+  // 50% składki zdrowotnej odliczane od przychodu (art. 11 ust. 3 pkt 7 ustawy o ryczałcie)
   const odliczenie = zdrow * 0.5;
   const podstRyczalt = Math.max(0, przychod - odliczenie);
   const ryczalt = Math.round(podstRyczalt * T.RYCZALT_RATE_12);
@@ -107,6 +110,8 @@ function calcRyczalt(przychod, yearPrzychodSoFar = 0) {
   return {
     przychod,
     zdrow: Math.round(zdrow * 100) / 100,
+    zdrowTier,
+    yearTotal: Math.round(yearTotal * 100) / 100,
     ryczalt,
     netto: Math.round(netto * 100) / 100,
     zusSpol: 0,
@@ -330,7 +335,7 @@ export default function App() {
       const cat = getCat("income", e.category);
       bruttoTotal += e.amount;
       if (cat.taxType === "uop") {
-        const r = calcUoP(e.amount, ytd.uopPitBase, ytd.uopBrutto, taxProfile.kup);
+        const r = calcUoP(e.amount, ytd.uopPitBase, ytd.uopBrutto, taxProfile.kup, { chorOpt: taxProfile.chorOpt ?? true, ppk: taxProfile.ppk, ppkRate: taxProfile.ppkRate });
         if (r) { bruttoUoP += r.brutto; nettoUoP += r.netto; zusUoP += r.zusSpol; zdrowUoP += r.zdrow; pitUoP += r.pit; nettoFromTaxed += r.netto; ytd.uopPitBase += r.pitBase; ytd.uopBrutto += e.amount; }
       } else if (cat.taxType === "ryczalt12") {
         const r = calcRyczalt(e.amount, ytd.ryczaltPrzychod);
@@ -341,7 +346,8 @@ export default function App() {
     const expense = entries.filter(e => e.type === "expense").reduce((s,e)=>s+e.amount,0);
     const realIncome = nettoFromTaxed + inneIncome;
     const net = realIncome - expense;
-    return { entries, expense, bruttoUoP, nettoUoP, zusUoP, zdrowUoP, pitUoP, przychodJDG, nettoJDG, zdrowJDG, ryczaltJDG, inneIncome, bruttoTotal, realIncome, net, ytd };
+    const ryczaltYtd = ytd.ryczaltPrzychod; // skumulowany przychód JDG po tym miesiącu (do wyświetlenia progu zdrowotnej)
+    return { entries, expense, bruttoUoP, nettoUoP, zusUoP, zdrowUoP, pitUoP, przychodJDG, nettoJDG, zdrowJDG, ryczaltJDG, inneIncome, bruttoTotal, realIncome, net, ytd, ryczaltYtd };
   };
 
   const mKey = monthKey(selYear, selMonth);
@@ -1074,7 +1080,45 @@ export default function App() {
                     <div style={{color:"#888"}}>Ryczałt 12%</div><div className="amber" style={{fontFamily:"monospace",fontWeight:600,textAlign:"right"}}>{fmtDec(yearTax.totalJdgRyczalt)}</div>
                     <div style={{color:"#4ade80",fontWeight:600}}>Na rękę</div><div className="green" style={{fontFamily:"monospace",fontWeight:700,textAlign:"right"}}>{fmtDec(yearTax.totalJdgNetto)}</div>
                   </div>
-                  <div style={{marginTop:10,padding:"8px 12px",background:"rgba(74,222,128,.06)",borderRadius:10,fontSize:11,color:"#4ade80"}}>✓ Zwolniony z ZUS</div>
+                  <div style={{marginTop:10,padding:"8px 12px",background:"rgba(74,222,128,.06)",borderRadius:10,fontSize:11,color:"#4ade80"}}>✓ Zwolniony z ZUS społecznego (opłacany oddzielnie jako ryczałtowiec)</div>
+                  {/* Progi składki zdrowotnej ryczałtowca */}
+                  {(() => {
+                    const T = TAX_2026.ZDROW_RYCZALT;
+                    const ytd = yearTax.totalJdgPrzychod;
+                    const tier = ytd <= T.THRESHOLD_1 ? 1 : ytd <= T.THRESHOLD_2 ? 2 : 3;
+                    const tiers = [
+                      { max: T.THRESHOLD_1, amt: T.AMOUNT_1, label: "Próg I", range: "≤ 60 000 PLN" },
+                      { max: T.THRESHOLD_2, amt: T.AMOUNT_2, label: "Próg II", range: "60–300 tys. PLN" },
+                      { max: null, amt: T.AMOUNT_3, label: "Próg III", range: "> 300 000 PLN" },
+                    ];
+                    const nextThreshold = tier === 1 ? T.THRESHOLD_1 : tier === 2 ? T.THRESHOLD_2 : null;
+                    const pctToNext = nextThreshold ? Math.min(100, (ytd / nextThreshold) * 100) : 100;
+                    return (
+                      <div style={{marginTop:10,padding:"12px",background:"rgba(125,211,252,.04)",border:"1px solid rgba(125,211,252,.1)",borderRadius:10}}>
+                        <div style={{fontSize:10,color:"#7dd3fc",textTransform:"uppercase",letterSpacing:".08em",fontWeight:600,marginBottom:8}}>Progi składki zdrowotnej (3 typy)</div>
+                        <div style={{display:"flex",gap:6,marginBottom:10}}>
+                          {tiers.map((t, i) => (
+                            <div key={i} style={{flex:1,padding:"8px 6px",borderRadius:8,background:tier===i+1?"rgba(125,211,252,.15)":"rgba(255,255,255,.03)",border:tier===i+1?"1px solid rgba(125,211,252,.3)":"1px solid rgba(255,255,255,.06)",textAlign:"center"}}>
+                              <div style={{fontSize:10,color:tier===i+1?"#7dd3fc":"#444",fontWeight:700}}>{t.label}</div>
+                              <div style={{fontSize:9,color:"#444",marginBottom:2}}>{t.range}</div>
+                              <div style={{fontSize:11,fontFamily:"monospace",color:tier===i+1?"#7dd3fc":"#444",fontWeight:600}}>{fmtDec(t.amt)}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {nextThreshold && (
+                          <>
+                            <div style={{height:4,borderRadius:4,background:"rgba(255,255,255,.06)",marginBottom:4,overflow:"hidden"}}>
+                              <div style={{height:"100%",width:`${pctToNext}%`,background:"linear-gradient(90deg,#7dd3fc,#38bdf8)",borderRadius:4,transition:"width .3s"}}/>
+                            </div>
+                            <div style={{fontSize:10,color:"#44445a"}}>
+                              {fmtDec(ytd)} / {fmtDec(nextThreshold)} PLN — do zmiany progu: <strong style={{color:"#7dd3fc"}}>{Math.max(0,nextThreshold-ytd).toLocaleString("pl-PL")} PLN</strong>
+                            </div>
+                          </>
+                        )}
+                        {!nextThreshold && <div style={{fontSize:10,color:"#f87171"}}>⚠️ Najwyższy próg – składka zdrowotna: {fmtDec(T.AMOUNT_3)} / mies.</div>}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -1495,19 +1539,27 @@ export default function App() {
                   const effectivePct = brutto > 0 ? Math.round(((brutto - netto) / brutto) * 100) : 0;
                   const rows = isUoP ? [
                     { label:"Brutto", val: r.brutto, color:"#eeeaf4" },
-                    { label:"ZUS emerytalne", val: -r.zusEmery, color:"#a78bfa" },
-                    { label:"ZUS rentowe", val: -r.zusRent, color:"#a78bfa" },
-                    { label:"ZUS chorobowe" + (taxProfile.chorOpt===false ? " (opt-out)" : ""), val: -r.zusChor, color:"#a78bfa" },
+                    { label:"ZUS emerytalne (9,76%)" + (r.zusEmery === 0 ? " ⚡ limit 30×" : ""), val: -r.zusEmery, color: r.zusEmery === 0 ? "#444" : "#a78bfa" },
+                    { label:"ZUS rentowe (1,5%)" + (r.zusRent === 0 ? " ⚡ limit 30×" : ""), val: -r.zusRent, color: r.zusRent === 0 ? "#444" : "#a78bfa" },
+                    { label:"ZUS chorobowe (2,45%)" + (taxProfile.chorOpt===false ? " – opt-out" : " – brak limitu"), val: -r.zusChor, color: r.zusChor === 0 ? "#444" : "#a78bfa" },
                     { label:"Składka zdrowotna (9%)", val: -r.zdrow, color:"#7dd3fc" },
                     { label:"Zaliczka PIT", val: -r.pit, color:"#fbbf24" },
                     ...(r.ppkEmployee > 0 ? [{ label:`PPK pracownik (${taxProfile.ppkRate}%)`, val: -r.ppkEmployee, color:"#fb923c" }] : []),
                     { label:"Na rękę (netto)", val: r.netto, color:"#4ade80", bold:true },
-                  ] : [
-                    { label:"Przychód (brutto)", val: r.przychod, color:"#eeeaf4" },
-                    { label:"Składka zdrowotna", val: -r.zdrow, color:"#7dd3fc" },
-                    { label:"Ryczałt 12%", val: -r.ryczalt, color:"#fbbf24" },
-                    { label:"Na rękę (netto)", val: r.netto, color:"#4ade80", bold:true },
-                  ];
+                  ] : (() => {
+                    const T = TAX_2026.ZDROW_RYCZALT;
+                    const tierLabels = ["", "≤ 60 000 PLN/rok", "60–300 k PLN/rok", "> 300 000 PLN/rok"];
+                    const nextThreshold = r.zdrowTier === 1 ? T.THRESHOLD_1 : r.zdrowTier === 2 ? T.THRESHOLD_2 : null;
+                    const remaining = nextThreshold ? Math.max(0, nextThreshold - r.yearTotal) : null;
+                    return [
+                      { label:"Przychód", val: r.przychod, color:"#eeeaf4" },
+                      { label:`Składka zdrowotna – Próg ${r.zdrowTier}/3 (${tierLabels[r.zdrowTier]})`, val: -r.zdrow, color:"#7dd3fc" },
+                      { label:"Odliczenie od podstawy (50% zdrow.)", val: +(r.zdrow * 0.5).toFixed(2), color:"#4ade80", note:true },
+                      { label:"Ryczałt 12%", val: -r.ryczalt, color:"#fbbf24" },
+                      ...(remaining !== null && remaining > 0 ? [{ label:`→ do nast. progu zdrowotnej: ${Math.round(remaining).toLocaleString("pl-PL")} PLN`, val: null, color:"#44445a", note:true }] : []),
+                      { label:"Na rękę (netto)", val: r.netto, color:"#4ade80", bold:true },
+                    ];
+                  })();
                   return (
                     <div style={{marginBottom:14,background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.07)",borderRadius:14,overflow:"hidden"}}>
                       <div style={{padding:"8px 14px",background:"rgba(255,193,7,.06)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -1516,8 +1568,10 @@ export default function App() {
                       </div>
                       <div style={{padding:"10px 14px",display:"flex",flexDirection:"column",gap:4}}>
                         {rows.map((row, i) => (
-                          <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderBottom:row.bold?"1px solid rgba(255,255,255,.06)":"none",marginBottom:row.bold?"2px":"0",paddingTop:row.bold?"6px":"3px"}}>
-                            <span style={{fontSize:12,color: row.bold?"#eeeaf4":"#888",fontWeight:row.bold?600:400}}>{row.label}</span>
+                          row.val === null
+                          ? <div key={i} style={{fontSize:10,color:row.color,fontStyle:"italic",padding:"2px 0"}}>{row.label}</div>
+                          : <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderBottom:row.bold?"1px solid rgba(255,255,255,.06)":"none",marginBottom:row.bold?"2px":"0",paddingTop:row.bold?"6px":"3px"}}>
+                            <span style={{fontSize:row.note?10:12,color: row.bold?"#eeeaf4":"#888",fontWeight:row.bold?600:400,fontStyle:row.note?"italic":"normal"}}>{row.label}</span>
                             <span style={{fontSize:row.bold?14:12,fontWeight:row.bold?700:500,color:row.color,fontFamily:"monospace"}}>
                               {row.val >= 0 ? "+" : ""}{fmtDec(row.val)}
                             </span>
