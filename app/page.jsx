@@ -1168,38 +1168,68 @@ export default function App() {
                   <input type="number" inputMode="decimal" placeholder="0,00" value={txForm.amount} onChange={e=>setTxForm(f=>({...f,amount:e.target.value}))} style={{flex:1,fontSize:isMobile?20:26,fontWeight:700,fontFamily:"monospace"}}/>
                 </div>
 
-                {txForm.type==="income" && txForm.amount && CAT_INCOME.find(c=>c.id===txForm.category)?.isTaxed && (
-                  <div style={{marginBottom:14,padding:"10px 12px",background:"rgba(255,193,7,.06)",borderRadius:10,fontSize:12,color:"#ffc107"}}>
-                    {txForm.inputMode==="brutto"
-                      ? `Wpisane: Brutto | Po opodatkowaniu: ~${(() => {
-                          const ytd = computeYtdContext(txForm.year,txForm.month);
-                          const cat = getCat("income",txForm.category);
-                          const amt = parseFloat(String(txForm.amount).replace(",","."));
-                          if (cat.taxType==="uop") {
-                            const r = calcUoP(amt, ytd.uopPitBase);
-                            return r ? fmt(r.netto) : "?";
-                          } else if(cat.taxType==="ryczalt12") {
-                            const r = calcRyczalt(amt, ytd.ryczaltPrzychod);
-                            return r ? fmt(r.netto) : "?";
-                          }
-                          return "?";
-                        })()}`
-                      : `Wpisane: Netto | Brutto do zarejestrowania: ~${(() => {
-                          const ytd = computeYtdContext(txForm.year,txForm.month);
-                          const cat = getCat("income",txForm.category);
-                          const amt = parseFloat(String(txForm.amount).replace(",","."));
-                          if (cat.taxType==="uop") {
-                            const r = calcUoPFromNetto(amt, ytd.uopPitBase);
-                            return r ? fmt(r.brutto) : "?";
-                          } else if(cat.taxType==="ryczalt12") {
-                            const r = calcRyczaltFromNetto(amt, ytd.ryczaltPrzychod);
-                            return r ? fmt(r.przychod) : "?";
-                          }
-                          return "?";
-                        })()}`
-                    }
-                  </div>
-                )}
+                {txForm.type==="income" && txForm.amount && CAT_INCOME.find(c=>c.id===txForm.category)?.isTaxed && (()=>{
+                  const ytd = computeYtdContext(txForm.year, txForm.month);
+                  const cat = getCat("income", txForm.category);
+                  const amt = parseFloat(String(txForm.amount).replace(",","."));
+                  if (!amt || amt <= 0) return null;
+                  let r = null;
+                  if (txForm.inputMode === "brutto") {
+                    if (cat.taxType === "uop") r = calcUoP(amt, ytd.uopPitBase);
+                    else if (cat.taxType === "ryczalt12") r = calcRyczalt(amt, ytd.ryczaltPrzychod);
+                  } else {
+                    if (cat.taxType === "uop") r = calcUoPFromNetto(amt, ytd.uopPitBase);
+                    else if (cat.taxType === "ryczalt12") r = calcRyczaltFromNetto(amt, ytd.ryczaltPrzychod);
+                  }
+                  if (!r) return null;
+                  const isUoP = cat.taxType === "uop";
+                  const brutto = isUoP ? r.brutto : r.przychod;
+                  const netto = r.netto;
+                  const effectivePct = brutto > 0 ? Math.round(((brutto - netto) / brutto) * 100) : 0;
+                  if (isMobile) {
+                    // Mobilny: tylko jedna linia z netto/brutto
+                    return (
+                      <div style={{marginBottom:14,padding:"10px 12px",background:"rgba(255,193,7,.06)",borderRadius:10,fontSize:12,color:"#ffc107"}}>
+                        {txForm.inputMode==="brutto"
+                          ? `Na rękę: ~${fmt(netto)}`
+                          : `Brutto do zapisu: ~${fmt(brutto)}`}
+                      </div>
+                    );
+                  }
+                  // Desktop: szczegółowy breakdown
+                  const rows = isUoP ? [
+                    { label:"Brutto", val: r.brutto, color:"#eeeaf4" },
+                    { label:"ZUS emerytalne", val: -r.zusEmery, color:"#a78bfa" },
+                    { label:"ZUS rentowe", val: -r.zusRent, color:"#a78bfa" },
+                    { label:"ZUS chorobowe", val: -r.zusChor, color:"#a78bfa" },
+                    { label:"Składka zdrowotna (9%)", val: -r.zdrow, color:"#7dd3fc" },
+                    { label:"Zaliczka PIT", val: -r.pit, color:"#fbbf24" },
+                    { label:"Na rękę (netto)", val: r.netto, color:"#4ade80", bold:true },
+                  ] : [
+                    { label:"Przychód (brutto)", val: r.przychod, color:"#eeeaf4" },
+                    { label:"Składka zdrowotna", val: -r.zdrow, color:"#7dd3fc" },
+                    { label:"Ryczałt 12%", val: -r.ryczalt, color:"#fbbf24" },
+                    { label:"Na rękę (netto)", val: r.netto, color:"#4ade80", bold:true },
+                  ];
+                  return (
+                    <div style={{marginBottom:14,background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.07)",borderRadius:14,overflow:"hidden"}}>
+                      <div style={{padding:"8px 14px",background:"rgba(255,193,7,.06)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                        <span style={{fontSize:11,color:"#fbbf24",fontWeight:600,textTransform:"uppercase",letterSpacing:".08em"}}>Rozbicie podatkowe</span>
+                        <span style={{fontSize:11,color:"#44445a"}}>efektywne obciążenie: <strong style={{color:"#fbbf24"}}>{effectivePct}%</strong></span>
+                      </div>
+                      <div style={{padding:"10px 14px",display:"flex",flexDirection:"column",gap:4}}>
+                        {rows.map((row, i) => (
+                          <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderBottom:row.bold?"1px solid rgba(255,255,255,.06)":"none",marginBottom:row.bold?"2px":"0",paddingTop:row.bold?"6px":"3px"}}>
+                            <span style={{fontSize:12,color: row.bold?"#eeeaf4":"#888",fontWeight:row.bold?600:400}}>{row.label}</span>
+                            <span style={{fontSize:row.bold?14:12,fontWeight:row.bold?700:500,color:row.color,fontFamily:"monospace"}}>
+                              {row.val >= 0 ? "+" : ""}{fmtDec(row.val)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 <div className="input-box" style={{marginBottom:20}}>
                   <input type="text" placeholder="Notatka (opcjonalnie)" value={txForm.note} onChange={e=>setTxForm(f=>({...f,note:e.target.value}))} style={{flex:1,fontSize:14}}/>
