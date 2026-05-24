@@ -15,7 +15,10 @@ const TAX_2026 = {
   KUP_BASE: 300,          // podwyższone KUP – dojeżdżający (art. 22 ust. 2 ustawy o PIT)
   ZUS_LIMIT_30X: 260190, // limit podstawy składek emerytalnej i rentowej (30 × prognoz. śr. 2025/26)
   ULGA_PRORODZINNA_1: 1112.04,  // ulga na 1. dziecko (roczna)
-  ULGA_PRORODZINNA_2: 2224.08,  // ulga na 2. dziecko łącznie (2 × 1112.04)
+  ULGA_PRORODZINNA_2: 2224.08,  // 2 dzieci łącznie
+  ULGA_PRORODZINNA_3: 4224.12,  // 3 dzieci łącznie (3. dziecko: +2 000.04)
+  ULGA_PRORODZINNA_4: 6924.12,  // 4 dzieci łącznie (4. dziecko: +2 700.00)
+  ULGA_INTERNET: 760,           // ulga internetowa (art. 26 ust. 1 pkt 6a uPIT, max 2 kolejne lata)
   ZDROW_RYCZALT: {
     THRESHOLD_1: 60000,
     THRESHOLD_2: 300000,
@@ -26,19 +29,27 @@ const TAX_2026 = {
   RYCZALT_RATE_12: 0.12,
 };
 
-function calcUoP(brutto, yearGrossSoFar = 0, yearBruttoSoFar = 0, kup = TAX_2026.KUP_BASE) {
+function calcUoP(brutto, yearGrossSoFar = 0, yearBruttoSoFar = 0, kup = TAX_2026.KUP_BASE, opts = {}) {
   if (!brutto || brutto <= 0) return null;
   const T = TAX_2026;
+  // chorOpt: ubezpieczenie chorobowe dobrowolne przy zbiegu tytułów (art. 11 ust. 2 uSUS)
+  // ppk: składka pracownika PPK (ustawa o PPK, art. 27); pomniejsza netto, nie obniża podstawy ZUS/PIT
+  const { chorOpt = true, ppk = false, ppkRate = 2 } = opts;
   // Limit 30-krotności: składki emerytalna i rentowa nie pobierają się po przekroczeniu progu
+  // (art. 19 ust. 1 uSUS; roczna podstawa wymiaru = 260 190 PLN na 2026)
   const remaining30x = Math.max(0, T.ZUS_LIMIT_30X - yearBruttoSoFar);
   const baseForEmeryRent = Math.min(brutto, remaining30x);
   const zusEmery = baseForEmeryRent * T.ZUS_EMERY;
   const zusRent = baseForEmeryRent * T.ZUS_RENT;
-  const zusChor = brutto * T.ZUS_CHOR; // chorobowa bez limitu
+  // Chorobowa (2.45%): BRAK górnego limitu podstawy (art. 20 uSUS);
+  // dobrowolna przy niejedynym tytule ubezpieczeniowym (np. dwa etaty, zbieg UoP+JDG)
+  const zusChor = chorOpt ? brutto * T.ZUS_CHOR : 0;
   const zusSpol = zusEmery + zusRent + zusChor;
   const podstZdrow = brutto - zusSpol;
   const zdrow = podstZdrow * T.ZDROW;
-  const podstPit = brutto - zusSpol - kup;
+  // Składka PPK pracownika: zakres 0,5–4% brutto (domyślnie 2%); pobierana z wynagrodzenia netto
+  const ppkEmployee = ppk ? Math.round(brutto * (ppkRate / 100) * 100) / 100 : 0;
+  const podstPit = Math.max(0, brutto - zusSpol - kup);
   const yearAfterMonth = yearGrossSoFar + podstPit;
   let pit;
   if (yearAfterMonth <= T.PIT_THRESHOLD) {
@@ -52,7 +63,7 @@ function calcUoP(brutto, yearGrossSoFar = 0, yearBruttoSoFar = 0, kup = TAX_2026
   }
   pit = Math.max(0, pit - T.PIT_MONTHLY_REDUCTION);
   pit = Math.round(pit);
-  const netto = brutto - zusSpol - zdrow - pit;
+  const netto = brutto - zusSpol - zdrow - pit - ppkEmployee;
   return {
     brutto,
     zusEmery: Math.round(zusEmery * 100) / 100,
@@ -60,24 +71,25 @@ function calcUoP(brutto, yearGrossSoFar = 0, yearBruttoSoFar = 0, kup = TAX_2026
     zusChor: Math.round(zusChor * 100) / 100,
     zusSpol: Math.round(zusSpol * 100) / 100,
     zdrow: Math.round(zdrow * 100) / 100,
+    ppkEmployee,
     pit: Math.round(pit),
     netto: Math.round(netto * 100) / 100,
     pitBase: podstPit,
   };
 }
 
-function calcUoPFromNetto(netto, yearGrossSoFar = 0, yearBruttoSoFar = 0, kup = TAX_2026.KUP_BASE) {
+function calcUoPFromNetto(netto, yearGrossSoFar = 0, yearBruttoSoFar = 0, kup = TAX_2026.KUP_BASE, opts = {}) {
   if (!netto || netto <= 0) return null;
   let brutto = netto / 0.72;
   for (let i = 0; i < 20; i++) {
-    const r = calcUoP(brutto, yearGrossSoFar, yearBruttoSoFar, kup);
+    const r = calcUoP(brutto, yearGrossSoFar, yearBruttoSoFar, kup, opts);
     if (!r) break;
     const diff = r.netto - netto;
     if (Math.abs(diff) < 0.01) break;
     brutto -= diff * 0.9;
     if (brutto <= 0) { brutto = netto; break; }
   }
-  return calcUoP(Math.round(brutto * 100) / 100, yearGrossSoFar, yearBruttoSoFar, kup);
+  return calcUoP(Math.round(brutto * 100) / 100, yearGrossSoFar, yearBruttoSoFar, kup, opts);
 }
 
 function calcRyczalt(przychod, yearPrzychodSoFar = 0) {
@@ -170,6 +182,7 @@ export default function App() {
     kup: 300,           // koszty uzysk. przychodu: 250 (podstawowe) lub 300 (podwyższone)
     dzieci: 2,          // liczba dzieci do ulgi prorodzinnej
     ulgaInternet: false,// ulga na internet 760 PLN/rok
+    chorOpt: true,      // dobrowolne ubezpieczenie chorobowe (false = zwolnienie przy zbiegu tytułów)
     ppk: false,         // czy uczestnik PPK
     ppkRate: 2,         // składka PPK pracownika w %
   }));
@@ -288,6 +301,7 @@ export default function App() {
 
   const computeYtdContext = (year, untilMonth) => {
     const kup = taxProfile.kup;
+    const opts = { chorOpt: taxProfile.chorOpt ?? true, ppk: taxProfile.ppk, ppkRate: taxProfile.ppkRate };
     let uopPitBase = 0;
     let uopBrutto = 0;
     let ryczaltPrzychod = 0;
@@ -296,7 +310,7 @@ export default function App() {
       ents.filter(e => e.type === "income").forEach(e => {
         const cat = getCat("income", e.category);
         if (cat.taxType === "uop") {
-          const r = calcUoP(e.amount, uopPitBase, uopBrutto, kup);
+          const r = calcUoP(e.amount, uopPitBase, uopBrutto, kup, opts);
           if (r) { uopPitBase += r.pitBase; uopBrutto += e.amount; }
         }
         if (cat.taxType === "ryczalt12") ryczaltPrzychod += e.amount;
@@ -359,7 +373,7 @@ export default function App() {
       ents.filter(e => e.type === "income").forEach(e => {
         const cat = getCat("income", e.category);
         if (cat.taxType === "uop") {
-          const r = calcUoP(e.amount, uopPitBaseSoFar, 0, taxProfile.kup);
+          const r = calcUoP(e.amount, uopPitBaseSoFar, 0, taxProfile.kup, { chorOpt: taxProfile.chorOpt ?? true, ppk: taxProfile.ppk, ppkRate: taxProfile.ppkRate });
           if (r) { monthBase += r.pitBase; uopPitBaseSoFar += r.pitBase; }
         }
       });
@@ -369,14 +383,15 @@ export default function App() {
     const currentMonth = now.getFullYear() === year ? now.getMonth() : 11;
     const ytdBase = monthlyBases[currentMonth]?.cumBase ?? 0;
 
-    // Podstawa małżonka: szacunkowa roczna na podstawie miesięcznego brutto
+    // Podstawa małżonka: sumujemy 12 miesięcy z uwzględnieniem limitu 30-krotności
     let spouseAnnualBase = 0;
     const spouseBrutto = parseFloat(String(spouseMonthlyBruttoVal).replace(",", ".")) || 0;
     if (jointFiling && spouseBrutto > 0) {
-      // Uproszczenie: liczymy bazę małżonka jako brutto - ZUS_społ - KUP_base * 12
-      const spouseZus = spouseBrutto * (T.ZUS_EMERY + T.ZUS_RENT + T.ZUS_CHOR);
-      const spouseMonthBase = Math.max(0, spouseBrutto - spouseZus - taxProfile.kup);
-      spouseAnnualBase = spouseMonthBase * 12;
+      let sCumBase = 0, sCumBrutto = 0;
+      for (let sm = 0; sm < 12; sm++) {
+        const sr = calcUoP(spouseBrutto, sCumBase, sCumBrutto, taxProfile.kup);
+        if (sr) { spouseAnnualBase += sr.pitBase; sCumBase += sr.pitBase; sCumBrutto += spouseBrutto; }
+      }
     }
 
     const THRESHOLD = T.PIT_THRESHOLD; // 120 000
@@ -478,7 +493,8 @@ export default function App() {
       ents.filter(e => e.type === "income").forEach(e => {
         const cat = getCat("income", e.category);
         if (cat.taxType === "uop") {
-          const r = calcUoP(e.amount, uopPitBaseSoFar, uopBruttoSoFar, profile.kup);
+          const uopOpts = { chorOpt: profile.chorOpt ?? true, ppk: profile.ppk, ppkRate: profile.ppkRate };
+          const r = calcUoP(e.amount, uopPitBaseSoFar, uopBruttoSoFar, profile.kup, uopOpts);
           if (r) {
             annualUopPitBase += r.pitBase;
             annualUopAdvances += r.pit;
@@ -512,8 +528,12 @@ export default function App() {
       const spouseBrutto = parseFloat(String(spouseMonthlyBruttoVal).replace(",", ".")) || 0;
       let spouseAnnualBase = 0;
       if (spouseBrutto > 0) {
-        const spouseZus = spouseBrutto * (T.ZUS_EMERY + T.ZUS_RENT + T.ZUS_CHOR);
-        spouseAnnualBase = Math.max(0, spouseBrutto - spouseZus - profile.kup) * 12;
+        // Sumujemy 12 miesięcy z pełnym limitem 30-krotności dla małżonka
+        let sCumBase = 0, sCumBrutto = 0;
+        for (let sm = 0; sm < 12; sm++) {
+          const sr = calcUoP(spouseBrutto, sCumBase, sCumBrutto, profile.kup);
+          if (sr) { spouseAnnualBase += sr.pitBase; sCumBase += sr.pitBase; sCumBrutto += spouseBrutto; }
+        }
       }
       const combined = annualUopPitBase + spouseAnnualBase;
       taxDue = calcAnnualTax(combined / 2) * 2;
@@ -571,7 +591,7 @@ export default function App() {
     if(txForm.inputMode==="netto"&&txForm.type==="income"&&cat.isTaxed) {
       const ytd = computeYtdContext(txForm.year,txForm.month);
       let r = null;
-      if(cat.taxType==="uop") r=calcUoPFromNetto(amt,ytd.uopPitBase);
+      if(cat.taxType==="uop") r=calcUoPFromNetto(amt,ytd.uopPitBase,ytd.uopBrutto,taxProfile.kup,{chorOpt:taxProfile.chorOpt??true,ppk:taxProfile.ppk,ppkRate:taxProfile.ppkRate});
       else if(cat.taxType==="ryczalt12") r=calcRyczaltFromNetto(amt,ytd.ryczaltPrzychod);
       if(r) bruttoAmt = cat.taxType==="uop" ? r.brutto : r.przychod;
     }
@@ -836,7 +856,7 @@ export default function App() {
                     {e.type==="income" && cat.isTaxed && (()=>{
                       const ytdCtx = computeYtdContext(selYear, selMonth);
                       let netto = null;
-                      if(cat.taxType==="uop") { const r=calcUoP(e.amount,ytdCtx.uopPitBase,ytdCtx.uopBrutto??0,taxProfile.kup); if(r) netto=r.netto; }
+                      if(cat.taxType==="uop") { const r=calcUoP(e.amount,ytdCtx.uopPitBase,ytdCtx.uopBrutto??0,taxProfile.kup,{chorOpt:taxProfile.chorOpt??true,ppk:taxProfile.ppk,ppkRate:taxProfile.ppkRate}); if(r) netto=r.netto; }
                       else if(cat.taxType==="ryczalt12") { const r=calcRyczalt(e.amount,ytdCtx.ryczaltPrzychod); if(r) netto=r.netto; }
                       return netto!==null ? <div style={{fontSize:10,color:"#4ade80",opacity:.7}}>netto {fmt(netto)}</div> : null;
                     })()}
@@ -1135,13 +1155,63 @@ export default function App() {
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
                 <div>
                   <div style={{fontSize:13,fontWeight:600,marginBottom:3}}>🌐 Ulga internetowa</div>
-                  <div style={{fontSize:11,color:"#44445a"}}>760 PLN odliczenia od podatku / rok (max 2 kolejne lata)</div>
+                  <div style={{fontSize:11,color:"#44445a"}}>760 PLN odliczenia od podatku / rok (art. 26 ust. 1 pkt 6a uPIT, max 2 kolejne lata)</div>
                 </div>
                 <button onClick={()=>setTaxProfile(p=>({...p,ulgaInternet:!p.ulgaInternet}))}
                   style={{width:50,height:28,borderRadius:999,background:taxProfile.ulgaInternet?"#4ade80":"rgba(255,255,255,.1)",position:"relative",flexShrink:0,transition:"background .2s",border:"none",cursor:"pointer"}}>
                   <div style={{position:"absolute",top:4,left:taxProfile.ulgaInternet?26:4,width:20,height:20,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
                 </button>
               </div>
+            </div>
+
+            {/* ZUS chorobowe opt-out */}
+            <div className="card" style={{padding:"18px",marginBottom:14}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:600,marginBottom:3}}>🏥 ZUS chorobowe (2,45%)</div>
+                  <div style={{fontSize:11,color:"#44445a",lineHeight:1.5}}>
+                    Dla UoP obowiązkowe przy jednym zatrudnieniu.<br/>
+                    Przy zbiegu tytułów (2 etaty lub UoP+JDG) składka z dodatkowego tytułu jest <strong style={{color:"#fbbf24"}}>dobrowolna</strong> (art. 11 ust. 2 uSUS).
+                  </div>
+                </div>
+                <button onClick={()=>setTaxProfile(p=>({...p,chorOpt:!(p.chorOpt??true)}))}
+                  style={{width:50,height:28,borderRadius:999,background:(taxProfile.chorOpt??true)?"#4ade80":"rgba(255,255,255,.1)",position:"relative",flexShrink:0,transition:"background .2s",border:"none",cursor:"pointer"}}>
+                  <div style={{position:"absolute",top:4,left:(taxProfile.chorOpt??true)?26:4,width:20,height:20,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+                </button>
+              </div>
+              {!(taxProfile.chorOpt??true) && (
+                <div style={{marginTop:10,padding:"8px 10px",background:"rgba(251,191,36,.06)",border:"1px solid rgba(251,191,36,.15)",borderRadius:8,fontSize:11,color:"#fbbf24"}}>
+                  ⚠️ Chorobowe wyłączone – brak prawa do zasiłku chorobowego z tego tytułu.
+                </div>
+              )}
+            </div>
+
+            {/* PPK */}
+            <div className="card" style={{padding:"18px",marginBottom:14}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,marginBottom:taxProfile.ppk?12:0}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:600,marginBottom:3}}>💰 PPK – Pracownicze Plany Kapitałowe</div>
+                  <div style={{fontSize:11,color:"#44445a"}}>Składka pracownika 2–4% brutto (ustawa o PPK, nie obniża PIT/ZUS)</div>
+                </div>
+                <button onClick={()=>setTaxProfile(p=>({...p,ppk:!p.ppk}))}
+                  style={{width:50,height:28,borderRadius:999,background:taxProfile.ppk?"#4ade80":"rgba(255,255,255,.1)",position:"relative",flexShrink:0,transition:"background .2s",border:"none",cursor:"pointer"}}>
+                  <div style={{position:"absolute",top:4,left:taxProfile.ppk?26:4,width:20,height:20,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+                </button>
+              </div>
+              {taxProfile.ppk && (
+                <div>
+                  <div style={{fontSize:11,color:"#44445a",marginBottom:8}}>Stawka składki pracownika</div>
+                  <div style={{display:"flex",gap:8}}>
+                    {[{val:0.5,label:"0,5%",desc:"min (deklaracja)"},{val:2,label:"2%",desc:"domyślna"},{val:3,label:"3%",desc:""},{val:4,label:"4%",desc:"max"}].map(opt=>(
+                      <button key={opt.val} onClick={()=>setTaxProfile(p=>({...p,ppkRate:opt.val}))}
+                        style={{flex:1,padding:"10px 6px",borderRadius:10,background:taxProfile.ppkRate===opt.val?"rgba(251,146,60,.15)":"rgba(255,255,255,.04)",border:taxProfile.ppkRate===opt.val?"1px solid rgba(251,146,60,.4)":"1px solid rgba(255,255,255,.08)",color:taxProfile.ppkRate===opt.val?"#fb923c":"#666",textAlign:"center",cursor:"pointer"}}>
+                        <div style={{fontSize:13,fontWeight:700}}>{opt.label}</div>
+                        {opt.desc && <div style={{fontSize:10,opacity:.7}}>{opt.desc}</div>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Podsumowanie */}
@@ -1153,6 +1223,8 @@ export default function App() {
                 {jointFiling && spouseMonthlyBrutto && (<><div style={{color:"#888"}}>Brutto żony</div><div style={{fontFamily:"monospace",color:"#a78bfa",fontWeight:600}}>{fmtDec(parseFloat(spouseMonthlyBrutto||0))} /mies.</div></>)}
                 <div style={{color:"#888"}}>Dzieci (ulga)</div><div style={{color:"#4ade80",fontWeight:600}}>{taxProfile.dzieci} {taxProfile.dzieci===1?"dziecko":taxProfile.dzieci<5?"dzieci":"dzieci"}</div>
                 <div style={{color:"#888"}}>Ulga internetowa</div><div style={{color:taxProfile.ulgaInternet?"#4ade80":"#444",fontWeight:600}}>{taxProfile.ulgaInternet?"✓ 760 PLN":"✗ brak"}</div>
+                <div style={{color:"#888"}}>ZUS chorobowe</div><div style={{color:(taxProfile.chorOpt??true)?"#4ade80":"#f87171",fontWeight:600}}>{(taxProfile.chorOpt??true)?"✓ opłacane (2,45%)":"✗ opt-out"}</div>
+                <div style={{color:"#888"}}>PPK</div><div style={{color:taxProfile.ppk?"#fb923c":"#444",fontWeight:600}}>{taxProfile.ppk?`✓ ${taxProfile.ppkRate}% brutto`:"✗ brak"}</div>
                 <div style={{color:"#888"}}>Limit ZUS (30×)</div><div style={{fontFamily:"monospace",color:"#fbbf24",fontWeight:600}}>{(260190).toLocaleString("pl-PL")} PLN</div>
               </div>
             </div>
@@ -1410,10 +1482,10 @@ export default function App() {
                   if (!amt || amt <= 0) return null;
                   let r = null;
                   if (txForm.inputMode === "brutto") {
-                    if (cat.taxType === "uop") r = calcUoP(amt, ytd.uopPitBase, ytd.uopBrutto??0, taxProfile.kup);
+                    if (cat.taxType === "uop") r = calcUoP(amt, ytd.uopPitBase, ytd.uopBrutto??0, taxProfile.kup, {chorOpt:taxProfile.chorOpt??true,ppk:taxProfile.ppk,ppkRate:taxProfile.ppkRate});
                     else if (cat.taxType === "ryczalt12") r = calcRyczalt(amt, ytd.ryczaltPrzychod);
                   } else {
-                    if (cat.taxType === "uop") r = calcUoPFromNetto(amt, ytd.uopPitBase);
+                    if (cat.taxType === "uop") r = calcUoPFromNetto(amt, ytd.uopPitBase, ytd.uopBrutto??0, taxProfile.kup, {chorOpt:taxProfile.chorOpt??true,ppk:taxProfile.ppk,ppkRate:taxProfile.ppkRate});
                     else if (cat.taxType === "ryczalt12") r = calcRyczaltFromNetto(amt, ytd.ryczaltPrzychod);
                   }
                   if (!r) return null;
@@ -1425,9 +1497,10 @@ export default function App() {
                     { label:"Brutto", val: r.brutto, color:"#eeeaf4" },
                     { label:"ZUS emerytalne", val: -r.zusEmery, color:"#a78bfa" },
                     { label:"ZUS rentowe", val: -r.zusRent, color:"#a78bfa" },
-                    { label:"ZUS chorobowe", val: -r.zusChor, color:"#a78bfa" },
+                    { label:"ZUS chorobowe" + (taxProfile.chorOpt===false ? " (opt-out)" : ""), val: -r.zusChor, color:"#a78bfa" },
                     { label:"Składka zdrowotna (9%)", val: -r.zdrow, color:"#7dd3fc" },
                     { label:"Zaliczka PIT", val: -r.pit, color:"#fbbf24" },
+                    ...(r.ppkEmployee > 0 ? [{ label:`PPK pracownik (${taxProfile.ppkRate}%)`, val: -r.ppkEmployee, color:"#fb923c" }] : []),
                     { label:"Na rękę (netto)", val: r.netto, color:"#4ade80", bold:true },
                   ] : [
                     { label:"Przychód (brutto)", val: r.przychod, color:"#eeeaf4" },
