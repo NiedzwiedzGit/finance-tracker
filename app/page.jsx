@@ -1186,17 +1186,6 @@ export default function App() {
                   const brutto = isUoP ? r.brutto : r.przychod;
                   const netto = r.netto;
                   const effectivePct = brutto > 0 ? Math.round(((brutto - netto) / brutto) * 100) : 0;
-                  if (isMobile) {
-                    // Mobilny: tylko jedna linia z netto/brutto
-                    return (
-                      <div style={{marginBottom:14,padding:"10px 12px",background:"rgba(255,193,7,.06)",borderRadius:10,fontSize:12,color:"#ffc107"}}>
-                        {txForm.inputMode==="brutto"
-                          ? `Na rękę: ~${fmt(netto)}`
-                          : `Brutto do zapisu: ~${fmt(brutto)}`}
-                      </div>
-                    );
-                  }
-                  // Desktop: szczegółowy breakdown
                   const rows = isUoP ? [
                     { label:"Brutto", val: r.brutto, color:"#eeeaf4" },
                     { label:"ZUS emerytalne", val: -r.zusEmery, color:"#a78bfa" },
