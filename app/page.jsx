@@ -1108,7 +1108,7 @@ export default function App() {
       </div>
 
       {/* MOBILE BOTTOM NAV */}
-      {isMobile && (
+      {isMobile && !modal && (
         <div style={{position:"fixed",bottom:0,left:0,right:0,background:"rgba(8,8,14,.95)",backdropFilter:"blur(20px)",borderTop:"1px solid rgba(255,255,255,.06)",padding:"10px 0 20px",display:"flex",alignItems:"center",justifyContent:"space-around",zIndex:300}}>
           {sidebarItems.map(item=>(
             <button key={item.id} onClick={()=>setTab(item.id)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,background:"none",color:tab===item.id?"#eeeaf4":"#2a2a40",transition:"color .2s",padding:"4px 6px"}}>
