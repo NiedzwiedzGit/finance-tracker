@@ -761,7 +761,7 @@ export default function App() {
 
         {/* TAXES */}
         {tab==="taxes" && (
-          <div style={{padding:isMobile?"56px 18px":"40px",maxWidth:1200,margin:"0 auto"}}>
+          <div style={{padding:isMobile?"56px 18px 120px":"40px",maxWidth:1200,margin:"0 auto"}}>
             <div style={{fontSize:isMobile?18:24,fontWeight:700,marginBottom:20}}>Podatki i składki</div>
             <div style={{display:"flex",gap:6,marginBottom:20}}>
               {YEARS.map(y=><button key={y} onClick={()=>setSelYear(y)} style={{padding:"8px 14px",borderRadius:10,background:selYear===y?"rgba(167,139,250,.15)":"rgba(255,255,255,.04)",color:selYear===y?"#a78bfa":"#666",fontSize:12,fontWeight:600}}>{y}</button>)}
