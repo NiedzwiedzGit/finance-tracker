@@ -12,7 +12,10 @@ const TAX_2026 = {
   PIT_THRESHOLD: 120000,
   PIT_FREE: 30000,
   PIT_MONTHLY_REDUCTION: 300,
-  KUP_BASE: 250,
+  KUP_BASE: 300,          // podwyższone KUP – dojeżdżający (art. 22 ust. 2 ustawy o PIT)
+  ZUS_LIMIT_30X: 260190, // limit podstawy składek emerytalnej i rentowej (30 × prognoz. śr. 2025/26)
+  ULGA_PRORODZINNA_1: 1112.04,  // ulga na 1. dziecko (roczna)
+  ULGA_PRORODZINNA_2: 2224.08,  // ulga na 2. dziecko łącznie (2 × 1112.04)
   ZDROW_RYCZALT: {
     THRESHOLD_1: 60000,
     THRESHOLD_2: 300000,
@@ -23,16 +26,19 @@ const TAX_2026 = {
   RYCZALT_RATE_12: 0.12,
 };
 
-function calcUoP(brutto, yearGrossSoFar = 0) {
+function calcUoP(brutto, yearGrossSoFar = 0, yearBruttoSoFar = 0, kup = TAX_2026.KUP_BASE) {
   if (!brutto || brutto <= 0) return null;
   const T = TAX_2026;
-  const zusEmery = brutto * T.ZUS_EMERY;
-  const zusRent = brutto * T.ZUS_RENT;
-  const zusChor = brutto * T.ZUS_CHOR;
+  // Limit 30-krotności: składki emerytalna i rentowa nie pobierają się po przekroczeniu progu
+  const remaining30x = Math.max(0, T.ZUS_LIMIT_30X - yearBruttoSoFar);
+  const baseForEmeryRent = Math.min(brutto, remaining30x);
+  const zusEmery = baseForEmeryRent * T.ZUS_EMERY;
+  const zusRent = baseForEmeryRent * T.ZUS_RENT;
+  const zusChor = brutto * T.ZUS_CHOR; // chorobowa bez limitu
   const zusSpol = zusEmery + zusRent + zusChor;
   const podstZdrow = brutto - zusSpol;
   const zdrow = podstZdrow * T.ZDROW;
-  const podstPit = brutto - zusSpol - T.KUP_BASE;
+  const podstPit = brutto - zusSpol - kup;
   const yearAfterMonth = yearGrossSoFar + podstPit;
   let pit;
   if (yearAfterMonth <= T.PIT_THRESHOLD) {
@@ -60,18 +66,18 @@ function calcUoP(brutto, yearGrossSoFar = 0) {
   };
 }
 
-function calcUoPFromNetto(netto, yearGrossSoFar = 0) {
+function calcUoPFromNetto(netto, yearGrossSoFar = 0, yearBruttoSoFar = 0, kup = TAX_2026.KUP_BASE) {
   if (!netto || netto <= 0) return null;
   let brutto = netto / 0.72;
   for (let i = 0; i < 20; i++) {
-    const r = calcUoP(brutto, yearGrossSoFar);
+    const r = calcUoP(brutto, yearGrossSoFar, yearBruttoSoFar, kup);
     if (!r) break;
     const diff = r.netto - netto;
     if (Math.abs(diff) < 0.01) break;
     brutto -= diff * 0.9;
     if (brutto <= 0) { brutto = netto; break; }
   }
-  return calcUoP(Math.round(brutto * 100) / 100, yearGrossSoFar);
+  return calcUoP(Math.round(brutto * 100) / 100, yearGrossSoFar, yearBruttoSoFar, kup);
 }
 
 function calcRyczalt(przychod, yearPrzychodSoFar = 0) {
@@ -160,6 +166,13 @@ export default function App() {
   const [savingForm, setSavingForm] = useState({goalId:"",amount:"",sourceIncome:"other_in"});
   const [jointFiling, setJointFiling] = useState(() => load("fin3_joint_filing", false));
   const [spouseMonthlyBrutto, setSpouseMonthlyBrutto] = useState(() => load("fin3_spouse_brutto", ""));
+  const [taxProfile, setTaxProfile] = useState(() => load("fin3_tax_profile", {
+    kup: 300,           // koszty uzysk. przychodu: 250 (podstawowe) lub 300 (podwyższone)
+    dzieci: 2,          // liczba dzieci do ulgi prorodzinnej
+    ulgaInternet: false,// ulga na internet 760 PLN/rok
+    ppk: false,         // czy uczestnik PPK
+    ppkRate: 2,         // składka PPK pracownika w %
+  }));
   const [backupPassword, setBackupPassword] = useState(() => load("fin3_backup_pwd", ""));
   const [backupStatus, setBackupStatus] = useState("");
   const [backupLoading, setBackupLoading] = useState(false);
@@ -183,6 +196,7 @@ export default function App() {
   useEffect(() => save("fin3_backup_pwd", backupPassword), [backupPassword]);
   useEffect(() => save("fin3_joint_filing", jointFiling), [jointFiling]);
   useEffect(() => save("fin3_spouse_brutto", spouseMonthlyBrutto), [spouseMonthlyBrutto]);
+  useEffect(() => save("fin3_tax_profile", taxProfile), [taxProfile]);
 
   useEffect(() => {
     if (backupPassword && isBackupDue()) {
@@ -273,20 +287,22 @@ export default function App() {
   };
 
   const computeYtdContext = (year, untilMonth) => {
+    const kup = taxProfile.kup;
     let uopPitBase = 0;
+    let uopBrutto = 0;
     let ryczaltPrzychod = 0;
     for (let m = 0; m < untilMonth; m++) {
       const ents = getMonthEntries(year, m);
       ents.filter(e => e.type === "income").forEach(e => {
         const cat = getCat("income", e.category);
         if (cat.taxType === "uop") {
-          const r = calcUoP(e.amount, uopPitBase);
-          if (r) uopPitBase += r.pitBase;
+          const r = calcUoP(e.amount, uopPitBase, uopBrutto, kup);
+          if (r) { uopPitBase += r.pitBase; uopBrutto += e.amount; }
         }
         if (cat.taxType === "ryczalt12") ryczaltPrzychod += e.amount;
       });
     }
-    return { uopPitBase, ryczaltPrzychod };
+    return { uopPitBase, uopBrutto, ryczaltPrzychod };
   };
 
   const computeMonthSummary = (year, month) => {
@@ -300,8 +316,8 @@ export default function App() {
       const cat = getCat("income", e.category);
       bruttoTotal += e.amount;
       if (cat.taxType === "uop") {
-        const r = calcUoP(e.amount, ytd.uopPitBase);
-        if (r) { bruttoUoP += r.brutto; nettoUoP += r.netto; zusUoP += r.zusSpol; zdrowUoP += r.zdrow; pitUoP += r.pit; nettoFromTaxed += r.netto; ytd.uopPitBase += r.pitBase; }
+        const r = calcUoP(e.amount, ytd.uopPitBase, ytd.uopBrutto, taxProfile.kup);
+        if (r) { bruttoUoP += r.brutto; nettoUoP += r.netto; zusUoP += r.zusSpol; zdrowUoP += r.zdrow; pitUoP += r.pit; nettoFromTaxed += r.netto; ytd.uopPitBase += r.pitBase; ytd.uopBrutto += e.amount; }
       } else if (cat.taxType === "ryczalt12") {
         const r = calcRyczalt(e.amount, ytd.ryczaltPrzychod);
         if (r) { przychodJDG += r.przychod; nettoJDG += r.netto; zdrowJDG += r.zdrow; ryczaltJDG += r.ryczalt; nettoFromTaxed += r.netto; ytd.ryczaltPrzychod += r.przychod; }
@@ -343,7 +359,7 @@ export default function App() {
       ents.filter(e => e.type === "income").forEach(e => {
         const cat = getCat("income", e.category);
         if (cat.taxType === "uop") {
-          const r = calcUoP(e.amount, uopPitBaseSoFar);
+          const r = calcUoP(e.amount, uopPitBaseSoFar, 0, taxProfile.kup);
           if (r) { monthBase += r.pitBase; uopPitBaseSoFar += r.pitBase; }
         }
       });
@@ -359,7 +375,7 @@ export default function App() {
     if (jointFiling && spouseBrutto > 0) {
       // Uproszczenie: liczymy bazę małżonka jako brutto - ZUS_społ - KUP_base * 12
       const spouseZus = spouseBrutto * (T.ZUS_EMERY + T.ZUS_RENT + T.ZUS_CHOR);
-      const spouseMonthBase = Math.max(0, spouseBrutto - spouseZus - T.KUP_BASE);
+      const spouseMonthBase = Math.max(0, spouseBrutto - spouseZus - taxProfile.kup);
       spouseAnnualBase = spouseMonthBase * 12;
     }
 
@@ -450,26 +466,24 @@ export default function App() {
   const thresholdInfo = computeSecondThresholdInfo(selYear, jointFiling, spouseMonthlyBrutto);
 
   // Roczne rozliczenie PIT – dopłata lub zwrot
-  const computeAnnualSettlement = (year, jointFiling, spouseMonthlyBruttoVal) => {
+  const computeAnnualSettlement = (year, jointFiling, spouseMonthlyBruttoVal, profile) => {
     const T = TAX_2026;
     let annualUopPitBase = 0;
-    let annualUopAdvances = 0; // suma zaliczek pobranych miesięcznie
-    for (let m = 0; m < 12; m++) {
-      const s = computeMonthSummary(year, m);
-      annualUopPitBase += s.ytd ? 0 : 0; // nie używamy ytd tutaj
-    }
-    // Przelicz sumę podstaw i zaliczek bezpośrednio
+    let annualUopAdvances = 0;
+    // Przelicz sumy podstaw i zaliczek z uwzględnieniem profilu (kup, limit 30x)
     let uopPitBaseSoFar = 0;
+    let uopBruttoSoFar = 0;
     for (let m = 0; m < 12; m++) {
       const ents = getMonthEntries(year, m);
       ents.filter(e => e.type === "income").forEach(e => {
         const cat = getCat("income", e.category);
         if (cat.taxType === "uop") {
-          const r = calcUoP(e.amount, uopPitBaseSoFar);
+          const r = calcUoP(e.amount, uopPitBaseSoFar, uopBruttoSoFar, profile.kup);
           if (r) {
             annualUopPitBase += r.pitBase;
             annualUopAdvances += r.pit;
             uopPitBaseSoFar += r.pitBase;
+            uopBruttoSoFar += e.amount;
           }
         }
       });
@@ -478,18 +492,20 @@ export default function App() {
 
     // Podatek należny roczny wg skali – obliczanie ROCZNE (bez miesięcznych redukcji)
     const calcAnnualTax = (base) => {
+      // Skala podatkowa 2026: próg porównujemy z pełnym dochodem (base), nie z taxableBase
       if (base <= 0) return 0;
-      const wolna = T.PIT_FREE; // 30 000
-      const taxableBase = Math.max(0, base - wolna);
-      if (taxableBase <= 0) return 0;
-      if (taxableBase <= T.PIT_THRESHOLD) {
-        // 12% - 3600 (kwota zmniejszająca = 30 000 * 12%)
-        return Math.max(0, taxableBase * T.PIT_RATE_1 - 3600);
-      } else {
-        return Math.max(0, T.PIT_THRESHOLD * T.PIT_RATE_1 - 3600 + (taxableBase - T.PIT_THRESHOLD) * T.PIT_RATE_2);
-      }
+      const KZD = 3600; // kwota zmniejszająca podatek = 30 000 × 12%
+      if (base <= T.PIT_FREE) return 0;                          // ≤ 30 000: podatek = 0
+      if (base <= T.PIT_THRESHOLD)                              // 30 001–120 000: 12% − 3 600
+        return Math.max(0, base * T.PIT_RATE_1 - KZD);
+      // > 120 000: 10 800 PLN + 32% nadwyżki
+      return (T.PIT_THRESHOLD * T.PIT_RATE_1 - KZD) + (base - T.PIT_THRESHOLD) * T.PIT_RATE_2;
     };
 
+    // Ulgi: prorodzinna + internet
+    const ulgaKidsMap = { 0: 0, 1: T.ULGA_PRORODZINNA_1, 2: T.ULGA_PRORODZINNA_2, 3: T.ULGA_PRORODZINNA_3 };
+    const ulgaProrodzinna = ulgaKidsMap[Math.min(profile.dzieci, 3)] ?? T.ULGA_PRORODZINNA_4;
+    const ulgaInt = profile.ulgaInternet ? T.ULGA_INTERNET : 0;
     let taxDue;
     let note = "";
     if (jointFiling) {
@@ -497,7 +513,7 @@ export default function App() {
       let spouseAnnualBase = 0;
       if (spouseBrutto > 0) {
         const spouseZus = spouseBrutto * (T.ZUS_EMERY + T.ZUS_RENT + T.ZUS_CHOR);
-        spouseAnnualBase = Math.max(0, spouseBrutto - spouseZus - T.KUP_BASE) * 12;
+        spouseAnnualBase = Math.max(0, spouseBrutto - spouseZus - profile.kup) * 12;
       }
       const combined = annualUopPitBase + spouseAnnualBase;
       taxDue = calcAnnualTax(combined / 2) * 2;
@@ -509,17 +525,23 @@ export default function App() {
       note = "Rozliczenie indywidualne";
     }
 
-    const settlement = annualUopAdvances - taxDue;
+    // Ulga prorodzinna + internet obniża podatek należny
+    const totalUlgi = ulgaProrodzinna + ulgaInt;
+    const taxDueAfterUlga = Math.max(0, taxDue - totalUlgi);
+    const settlement = annualUopAdvances - taxDueAfterUlga;
     return {
       annualUopPitBase,
       annualUopAdvances: Math.round(annualUopAdvances),
       taxDue: Math.round(taxDue),
-      settlement: Math.round(settlement), // >0 zwrot, <0 dopłata
+      taxDueAfterUlga: Math.round(taxDueAfterUlga),
+      ulgaProrodzinna,
+      ulgaInt,
+      settlement: Math.round(settlement),
       jointFiling,
       note,
     };
   };
-  const annualSettlement = computeAnnualSettlement(selYear, jointFiling, spouseMonthlyBrutto);
+  const annualSettlement = computeAnnualSettlement(selYear, jointFiling, spouseMonthlyBrutto, taxProfile);
 
   const computeForecast = () => {
     let pitSum=0,ryczaltSum=0,monthsCount=0;
@@ -634,6 +656,7 @@ export default function App() {
     {id:"taxes",icon:"🧾",label:"Podatki"},
     {id:"recurring",icon:"🔄",label:"Stałe"},
     {id:"goals",icon:"🎯",label:"Cele"},
+    {id:"settings",icon:"⚙️",label:"Profil"},
     {id:"backup",icon:"🔐",label:"Backup"},
   ];
 
@@ -813,7 +836,7 @@ export default function App() {
                     {e.type==="income" && cat.isTaxed && (()=>{
                       const ytdCtx = computeYtdContext(selYear, selMonth);
                       let netto = null;
-                      if(cat.taxType==="uop") { const r=calcUoP(e.amount,ytdCtx.uopPitBase); if(r) netto=r.netto; }
+                      if(cat.taxType==="uop") { const r=calcUoP(e.amount,ytdCtx.uopPitBase,ytdCtx.uopBrutto??0,taxProfile.kup); if(r) netto=r.netto; }
                       else if(cat.taxType==="ryczalt12") { const r=calcRyczalt(e.amount,ytdCtx.ryczaltPrzychod); if(r) netto=r.netto; }
                       return netto!==null ? <div style={{fontSize:10,color:"#4ade80",opacity:.7}}>netto {fmt(netto)}</div> : null;
                     })()}
@@ -972,10 +995,18 @@ export default function App() {
                 <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:"6px 16px",fontSize:isMobile?11:12,padding:"14px",background:"rgba(0,0,0,.3)",borderRadius:12,marginBottom:14}}>
                   <div style={{color:"#888"}}>Roczna podstawa opodatkowania</div>
                   <div style={{fontFamily:"monospace",fontWeight:600,textAlign:"right",color:"#eeeaf4"}}>{fmtDec(annualSettlement.annualUopPitBase)}</div>
-                  <div style={{color:"#888"}}>Podatek należny (roczny)</div>
+                  <div style={{color:"#888"}}>Podatek należny (skala roczna)</div>
                   <div style={{fontFamily:"monospace",fontWeight:600,textAlign:"right",color:"#fbbf24"}}>{fmtDec(annualSettlement.taxDue)}</div>
-                  <div style={{color:"#888"}}>Zaliczki pobrane w roku</div>
-                  <div style={{fontFamily:"monospace",fontWeight:600,textAlign:"right",color:"#a78bfa"}}>{fmtDec(annualSettlement.annualUopAdvances)}</div>
+                  <div style={{color:"#7dd3fc"}}>Ulga prorodzinna ({annualSettlement.ulgaProrodzinna > 0 ? `${taxProfile.dzieci} ${taxProfile.dzieci===1?"dziecko":"dzieci"}` : "brak"})</div>
+                  <div style={{fontFamily:"monospace",fontWeight:600,textAlign:"right",color:"#7dd3fc"}}>−{fmtDec(annualSettlement.ulgaProrodzinna)}</div>
+                  {annualSettlement.ulgaInt > 0 && (<>
+                    <div style={{color:"#7dd3fc"}}>Ulga internetowa</div>
+                    <div style={{fontFamily:"monospace",fontWeight:600,textAlign:"right",color:"#7dd3fc"}}>−{fmtDec(annualSettlement.ulgaInt)}</div>
+                  </>)}
+                  <div style={{color:"#888"}}>Podatek po uldze</div>
+                  <div style={{fontFamily:"monospace",fontWeight:600,textAlign:"right",color:"#fbbf24"}}>{fmtDec(annualSettlement.taxDueAfterUlga)}</div>
+                  <div style={{color:"#888",paddingTop:6,borderTop:"1px solid rgba(255,255,255,.06)"}}>Zaliczki pobrane w roku</div>
+                  <div style={{fontFamily:"monospace",fontWeight:600,textAlign:"right",color:"#a78bfa",paddingTop:6,borderTop:"1px solid rgba(255,255,255,.06)"}}>{fmtDec(annualSettlement.annualUopAdvances)}</div>
                   <div style={{color:annualSettlement.settlement>=0?"#4ade80":"#f87171",fontWeight:700,paddingTop:6,borderTop:"1px solid rgba(255,255,255,.06)"}}>
                     {annualSettlement.settlement>=0?"Zwrot od US":"Dopłata do US"}
                   </div>
@@ -985,7 +1016,7 @@ export default function App() {
                 </div>
 
                 <div style={{padding:"10px 12px",background:"rgba(255,255,255,.03)",borderRadius:10,fontSize:10,color:"#44445a",lineHeight:1.6}}>
-                  💡 <strong style={{color:"#555"}}>Podstawa obliczeń:</strong> Skala podatkowa 2026 — do 120 000 PLN: 12% − 3 600 PLN (kwota wolna 30 000 PLN). Powyżej: 10 800 PLN + 32% nadwyżki.{annualSettlement.jointFiling?" Przy wspólnym rozliczeniu podatek = f(suma/2) × 2.":" Rozliczenie indywidualne."} Wynik jest szacunkowy — nie uwzględnia ulg (np. prorodzinna, internetowa).
+                  💡 <strong style={{color:"#555"}}>Podstawa obliczeń (2026):</strong> Skala podatkowa: do 120 000 PLN: 12% − 3 600 PLN | pow. 120 000: 10 800 + 32% nadwyżki. KUP podwyższone: 300 PLN/mies. Limit ZUS emerytalnej+rentowej: 260 190 PLN brutto/rok. Ulga prorodzinna: 2 × 1 112,04 PLN = 2 224,08 PLN odliczone od podatku.{annualSettlement.jointFiling?" Wspólne rozliczenie: podatek = f(suma/2) × 2.":""} Wynik jest szacunkowy.
                 </div>
               </div>
             )}
@@ -1028,6 +1059,103 @@ export default function App() {
               )}
             </div>
 
+          </div>
+        )}
+
+        {/* SETTINGS */}
+        {tab==="settings" && (
+          <div style={{padding:isMobile?"56px 18px 120px":"40px",maxWidth:700,margin:"0 auto"}}>
+            <div style={{fontSize:isMobile?18:24,fontWeight:700,marginBottom:6}}>Profil podatkowy</div>
+            <div style={{fontSize:isMobile?11:13,color:"#44445a",marginBottom:24}}>Ustawienia używane do obliczeń PIT, ZUS i II progu</div>
+
+            {/* KUP */}
+            <div className="card" style={{padding:"18px",marginBottom:14}}>
+              <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>📋 Koszty uzyskania przychodu (KUP)</div>
+              <div style={{fontSize:11,color:"#44445a",marginBottom:12}}>art. 22 ust. 2 ustawy o PIT</div>
+              <div style={{display:"flex",gap:8}}>
+                {[{val:250,label:"250 PLN / mies.",desc:"Podstawowe (mieszkasz w miejscu pracy)"},{val:300,label:"300 PLN / mies.",desc:"Podwyższone (dojeżdżasz z innej miejscowości)"}].map(opt=>(
+                  <button key={opt.val} onClick={()=>setTaxProfile(p=>({...p,kup:opt.val}))}
+                    style={{flex:1,padding:"12px 10px",borderRadius:12,background:taxProfile.kup===opt.val?"rgba(125,211,252,.15)":"rgba(255,255,255,.04)",border:taxProfile.kup===opt.val?"1px solid rgba(125,211,252,.4)":"1px solid rgba(255,255,255,.08)",color:taxProfile.kup===opt.val?"#7dd3fc":"#666",textAlign:"left",cursor:"pointer"}}>
+                    <div style={{fontSize:13,fontWeight:700,marginBottom:3}}>{opt.label}</div>
+                    <div style={{fontSize:10,opacity:.7,lineHeight:1.4}}>{opt.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Rozliczenie / żona */}
+            <div className="card" style={{padding:"18px",marginBottom:14}}>
+              <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>💑 Sposób rozliczenia PIT</div>
+              <div style={{fontSize:11,color:"#44445a",marginBottom:12}}>Wpływa na II próg i roczne rozliczenie</div>
+              <div style={{display:"flex",gap:8,marginBottom:jointFiling?12:0}}>
+                {[{val:false,label:"👤 Solo",desc:"Indywidualne"},{val:true,label:"💑 Z żoną",desc:"Wspólne (art. 6 ust. 2 uPIT)"}].map(opt=>(
+                  <button key={String(opt.val)} onClick={()=>setJointFiling(opt.val)}
+                    style={{flex:1,padding:"12px 10px",borderRadius:12,background:jointFiling===opt.val?"rgba(167,139,250,.15)":"rgba(255,255,255,.04)",border:jointFiling===opt.val?"1px solid rgba(167,139,250,.4)":"1px solid rgba(255,255,255,.08)",color:jointFiling===opt.val?"#a78bfa":"#666",textAlign:"left",cursor:"pointer"}}>
+                    <div style={{fontSize:13,fontWeight:700,marginBottom:3}}>{opt.label}</div>
+                    <div style={{fontSize:10,opacity:.7}}>{opt.desc}</div>
+                  </button>
+                ))}
+              </div>
+              {jointFiling && (
+                <div style={{marginTop:4}}>
+                  <div style={{fontSize:11,color:"#a78bfa",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>Miesięczne brutto żony (UoP)</div>
+                  <div className="input-box">
+                    <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
+                    <input type="number" inputMode="decimal" placeholder="0" value={spouseMonthlyBrutto}
+                      onChange={e=>setSpouseMonthlyBrutto(e.target.value)}
+                      style={{flex:1,fontSize:16,fontWeight:600,fontFamily:"monospace"}}/>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Dzieci */}
+            <div className="card" style={{padding:"18px",marginBottom:14}}>
+              <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>👶 Ulga prorodzinna</div>
+              <div style={{fontSize:11,color:"#44445a",marginBottom:12}}>Liczba dzieci uprawniających do ulgi (art. 27f uPIT)</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {[0,1,2,3,4].map(n=>(
+                  <button key={n} onClick={()=>setTaxProfile(p=>({...p,dzieci:n}))}
+                    style={{flex:1,minWidth:48,padding:"12px 8px",borderRadius:12,background:taxProfile.dzieci===n?"rgba(74,222,128,.15)":"rgba(255,255,255,.04)",border:taxProfile.dzieci===n?"1px solid rgba(74,222,128,.4)":"1px solid rgba(255,255,255,.08)",color:taxProfile.dzieci===n?"#4ade80":"#666",fontWeight:700,fontSize:15,textAlign:"center",cursor:"pointer"}}>
+                    {n===4?"4+":n}
+                  </button>
+                ))}
+              </div>
+              {taxProfile.dzieci > 0 && (
+                <div style={{marginTop:10,fontSize:11,color:"#44445a"}}>
+                  Ulga: <span style={{color:"#4ade80",fontFamily:"monospace",fontWeight:600}}>
+                    {fmtDec([0,TAX_2026.ULGA_PRORODZINNA_1,TAX_2026.ULGA_PRORODZINNA_2,TAX_2026.ULGA_PRORODZINNA_3,TAX_2026.ULGA_PRORODZINNA_4][Math.min(taxProfile.dzieci,4)])} / rok
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Ulga internetowa */}
+            <div className="card" style={{padding:"18px",marginBottom:14}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:600,marginBottom:3}}>🌐 Ulga internetowa</div>
+                  <div style={{fontSize:11,color:"#44445a"}}>760 PLN odliczenia od podatku / rok (max 2 kolejne lata)</div>
+                </div>
+                <button onClick={()=>setTaxProfile(p=>({...p,ulgaInternet:!p.ulgaInternet}))}
+                  style={{width:50,height:28,borderRadius:999,background:taxProfile.ulgaInternet?"#4ade80":"rgba(255,255,255,.1)",position:"relative",flexShrink:0,transition:"background .2s",border:"none",cursor:"pointer"}}>
+                  <div style={{position:"absolute",top:4,left:taxProfile.ulgaInternet?26:4,width:20,height:20,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+                </button>
+              </div>
+            </div>
+
+            {/* Podsumowanie */}
+            <div style={{padding:"14px 16px",background:"rgba(255,255,255,.03)",borderRadius:14,border:"1px solid rgba(255,255,255,.07)",fontSize:12}}>
+              <div style={{color:"#44445a",marginBottom:10,fontWeight:600,textTransform:"uppercase",letterSpacing:".08em",fontSize:10}}>Podsumowanie profilu</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:"5px 16px"}}>
+                <div style={{color:"#888"}}>KUP</div><div style={{fontFamily:"monospace",color:"#7dd3fc",fontWeight:600}}>{taxProfile.kup} PLN/mies.</div>
+                <div style={{color:"#888"}}>Rozliczenie</div><div style={{color:"#a78bfa",fontWeight:600}}>{jointFiling?"Wspólne z żoną":"Indywidualne"}</div>
+                {jointFiling && spouseMonthlyBrutto && (<><div style={{color:"#888"}}>Brutto żony</div><div style={{fontFamily:"monospace",color:"#a78bfa",fontWeight:600}}>{fmtDec(parseFloat(spouseMonthlyBrutto||0))} /mies.</div></>)}
+                <div style={{color:"#888"}}>Dzieci (ulga)</div><div style={{color:"#4ade80",fontWeight:600}}>{taxProfile.dzieci} {taxProfile.dzieci===1?"dziecko":taxProfile.dzieci<5?"dzieci":"dzieci"}</div>
+                <div style={{color:"#888"}}>Ulga internetowa</div><div style={{color:taxProfile.ulgaInternet?"#4ade80":"#444",fontWeight:600}}>{taxProfile.ulgaInternet?"✓ 760 PLN":"✗ brak"}</div>
+                <div style={{color:"#888"}}>Limit ZUS (30×)</div><div style={{fontFamily:"monospace",color:"#fbbf24",fontWeight:600}}>{(260190).toLocaleString("pl-PL")} PLN</div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1282,7 +1410,7 @@ export default function App() {
                   if (!amt || amt <= 0) return null;
                   let r = null;
                   if (txForm.inputMode === "brutto") {
-                    if (cat.taxType === "uop") r = calcUoP(amt, ytd.uopPitBase);
+                    if (cat.taxType === "uop") r = calcUoP(amt, ytd.uopPitBase, ytd.uopBrutto??0, taxProfile.kup);
                     else if (cat.taxType === "ryczalt12") r = calcRyczalt(amt, ytd.ryczaltPrzychod);
                   } else {
                     if (cat.taxType === "uop") r = calcUoPFromNetto(amt, ytd.uopPitBase);
