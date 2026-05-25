@@ -177,7 +177,7 @@ export default function App() {
   const [goals, setGoals] = useState(() => load("fin3_goals", []));
   const [modal, setModal] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
-  const [txForm, setTxForm] = useState({type:"expense",amount:"",category:"food",note:"",year:now.getFullYear(),month:now.getMonth(),reverseCharge:false,inputMode:"brutto"});
+  const [txForm, setTxForm] = useState({type:"expense",amount:"",category:"food",note:"",year:now.getFullYear(),month:now.getMonth(),reverseCharge:false,inputMode:"brutto",currency:"PLN",hoursWorked:""});
   const [recurForm, setRecurForm] = useState({label:"",amount:"",category:"bills",icon:"📄",startYear:now.getFullYear(),startMonth:now.getMonth()});
   const [goalForm, setGoalForm] = useState({name:"",icon:"🏠",target:"",saved:"",deadline:""});
   const [savingForm, setSavingForm] = useState({goalId:"",amount:"",sourceIncome:"other_in"});
@@ -200,6 +200,12 @@ export default function App() {
   const [restoreText, setRestoreText] = useState("");
   const [restorePassword, setRestorePassword] = useState("");
   const fileInputRef = useRef(null);
+  const [uopDefaultSalary, setUopDefaultSalary] = useState(() => load("fin3_uop_default", null));
+  const [jdgContract, setJdgContract] = useState(() => load("fin3_jdg_contract", null));
+  const [jdgMonthlyHours, setJdgMonthlyHours] = useState(() => load("fin3_jdg_hours", {}));
+  const [eurRate, setEurRate] = useState(null);
+  const [eurRateLoading, setEurRateLoading] = useState(false);
+  const [eurRateDate, setEurRateDate] = useState(null);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -215,6 +221,9 @@ export default function App() {
   useEffect(() => save("fin3_joint_filing", jointFiling), [jointFiling]);
   useEffect(() => save("fin3_spouse_brutto", spouseMonthlyBrutto), [spouseMonthlyBrutto]);
   useEffect(() => save("fin3_tax_profile", taxProfile), [taxProfile]);
+  useEffect(() => save("fin3_uop_default", uopDefaultSalary), [uopDefaultSalary]);
+  useEffect(() => save("fin3_jdg_contract", jdgContract), [jdgContract]);
+  useEffect(() => save("fin3_jdg_hours", jdgMonthlyHours), [jdgMonthlyHours]);
 
   useEffect(() => {
     if (backupPassword && isBackupDue()) {
@@ -222,7 +231,7 @@ export default function App() {
     }
   }, [backupPassword]);
 
-  const getBackupData = () => ({ txData, recurring, goals });
+  const getBackupData = () => ({ txData, recurring, goals, uopDefaultSalary, jdgContract, jdgMonthlyHours });
 
   const handleBackup = async () => {
     if (!backupPassword) {
@@ -260,10 +269,13 @@ export default function App() {
     try {
       const result = await decryptBackup(restoreText.trim(), restorePassword);
       if (!result || !result.data) throw new Error("Niepoprawne dane");
-      const { txData: td, recurring: rc, goals: gl } = result.data;
+      const { txData: td, recurring: rc, goals: gl, uopDefaultSalary: ud, jdgContract: jc, jdgMonthlyHours: jh } = result.data;
       if (td) setTxData(td);
       if (rc) setRecurring(rc);
       if (gl) setGoals(gl);
+      if (ud) setUopDefaultSalary(ud);
+      if (jc) setJdgContract(jc);
+      if (jh) setJdgMonthlyHours(jh);
       setBackupStatus("✅ Dane przywrocone!");
       setShowRestoreInput(false);
       setRestoreText("");
@@ -290,6 +302,18 @@ export default function App() {
     setBackupPassword(pwd);
     setShowPassword(true);
     setBackupStatus("⚠️ Zapisz to haslo!");
+  };
+
+  const fetchEurRate = async () => {
+    setEurRateLoading(true);
+    try {
+      const res = await fetch("https://api.nbp.pl/api/exchangerates/rates/A/EUR/?format=json");
+      if (!res.ok) throw new Error("NBP error");
+      const data = await res.json();
+      setEurRate(data.rates[0].mid);
+      setEurRateDate(data.rates[0].effectiveDate);
+    } catch {}
+    setEurRateLoading(false);
   };
 
   const getMonthEntries = (y, m) => {
@@ -589,10 +613,19 @@ export default function App() {
   })();
 
   const submitTx = () => {
-    const amt = parseFloat(String(txForm.amount).replace(",","."));
-    if(!amt||amt<=0) return;
+    let rawAmt = parseFloat(String(txForm.amount).replace(",",".")) || 0;
     const k = monthKey(txForm.year,txForm.month);
     const cat = getCat("income",txForm.category);
+    const hoursWorkedNum = parseFloat(String(txForm.hoursWorked).replace(",",".")) || 0;
+    // JDG hours → auto-calculate amount from contract rate
+    if(txForm.type==="income" && txForm.category==="jdg_ryczalt" && hoursWorkedNum > 0 && jdgContract && parseFloat(jdgContract.ratePerHour) > 0) {
+      const rate = parseFloat(jdgContract.ratePerHour);
+      rawAmt = hoursWorkedNum * (jdgContract.currency === "EUR" && eurRate ? rate * eurRate : rate);
+    } else if(txForm.currency === "EUR" && eurRate && rawAmt > 0) {
+      rawAmt = rawAmt * eurRate;
+    }
+    const amt = rawAmt;
+    if(!amt||amt<=0) return;
     let bruttoAmt = amt;
     if(txForm.inputMode==="netto"&&txForm.type==="income"&&cat.isTaxed) {
       const ytd = computeYtdContext(txForm.year,txForm.month);
@@ -601,11 +634,17 @@ export default function App() {
       else if(cat.taxType==="ryczalt12") r=calcRyczaltFromNetto(amt,ytd.ryczaltPrzychod);
       if(r) bruttoAmt = cat.taxType==="uop" ? r.brutto : r.przychod;
     }
+    const extraFields = {};
+    if(txForm.currency === "EUR" && eurRate && txForm.type==="income") { extraFields.currencyOrig = "EUR"; extraFields.eurRateUsed = eurRate; extraFields.amtEur = parseFloat(String(txForm.amount).replace(",",".")) || 0; }
+    if(hoursWorkedNum > 0) extraFields.hoursWorked = hoursWorkedNum;
     if(editTarget) {
-      setTxData(prev=>({...prev,[k]:(prev[k]||[]).map(e=>e.id===editTarget.id?{...e,amount:bruttoAmt,category:txForm.category,note:txForm.note,type:txForm.type,reverseCharge:txForm.reverseCharge,inputMode:txForm.type==="income"?txForm.inputMode:undefined}:e)}));
+      setTxData(prev=>({...prev,[k]:(prev[k]||[]).map(e=>e.id===editTarget.id?{...e,amount:bruttoAmt,category:txForm.category,note:txForm.note,type:txForm.type,reverseCharge:txForm.reverseCharge,inputMode:txForm.type==="income"?txForm.inputMode:undefined,...extraFields}:e)}));
     } else {
-    const submittedEntry = {id:Date.now(),type:txForm.type,amount:bruttoAmt,category:txForm.category,note:txForm.note,date:new Date().toISOString(),reverseCharge:txForm.reverseCharge,inputMode:txForm.type==="income"?txForm.inputMode:undefined};
+      const submittedEntry = {id:Date.now(),type:txForm.type,amount:bruttoAmt,category:txForm.category,note:txForm.note,date:new Date().toISOString(),reverseCharge:txForm.reverseCharge,inputMode:txForm.type==="income"?txForm.inputMode:undefined,...extraFields};
       setTxData(prev=>({...prev,[k]:[...(prev[k]||[]),submittedEntry]}));
+    }
+    if(hoursWorkedNum > 0 && txForm.type === "income" && txForm.category === "jdg_ryczalt") {
+      setJdgMonthlyHours(prev => ({...prev, [k]: hoursWorkedNum}));
     }
     setModal(null); setEditTarget(null);
   };
@@ -666,7 +705,7 @@ export default function App() {
   const openEditTx = (entry) => {
     if(entry.isRecurring) return;
     setEditTarget(entry);
-    setTxForm({type:entry.type,amount:String(entry.amount),category:entry.category,note:entry.note||"",year:selYear,month:selMonth,reverseCharge:entry.reverseCharge||false,inputMode:entry.inputMode||"brutto"});
+    setTxForm({type:entry.type,amount:entry.currencyOrig==="EUR"?String(entry.amtEur||entry.amount):String(entry.amount),category:entry.category,note:entry.note||"",year:selYear,month:selMonth,reverseCharge:entry.reverseCharge||false,inputMode:entry.inputMode||"brutto",currency:entry.currencyOrig||"PLN",hoursWorked:entry.hoursWorked?String(entry.hoursWorked):""});
     setModal("addTx");
   };
   const openEditRecur = (r) => { setEditTarget(r); setRecurForm({label:r.label,amount:String(r.amount),category:r.category,icon:r.icon,startYear:r.startYear,startMonth:r.startMonth}); setModal("addRecur"); };
@@ -682,6 +721,7 @@ export default function App() {
     {id:"taxes",icon:"🧾",label:"Podatki"},
     {id:"recurring",icon:"🔄",label:"Stałe"},
     {id:"goals",icon:"🎯",label:"Cele"},
+    {id:"jdg_calendar",icon:"📅",label:"Kontrakt"},
     {id:"settings",icon:"⚙️",label:"Profil"},
     {id:"backup",icon:"🔐",label:"Backup"},
   ];
@@ -842,6 +882,28 @@ export default function App() {
                 </div>
               ))}
             </div>
+            {/* UoP autofill suggestion */}
+            {uopDefaultSalary && uopDefaultSalary.brutto > 0 && (() => {
+              const vk = monthKey(uopDefaultSalary.validFromYear, uopDefaultSalary.validFromMonth);
+              const mk2 = monthKey(selYear, selMonth);
+              const hasUoP = summary.entries.some(e => e.type === "income" && e.category === "uop");
+              if (vk <= mk2 && !hasUoP) return (
+                <div style={{marginBottom:12,padding:"12px 14px",background:"rgba(125,211,252,.08)",borderRadius:14,border:"1px solid rgba(125,211,252,.2)",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                  <span style={{fontSize:16}}>💼</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:600,color:"#7dd3fc"}}>Autofill wynagrodzenia UoP</div>
+                    <div style={{fontSize:11,color:"#44445a"}}>Domyślne: {fmt(uopDefaultSalary.brutto)} brutto</div>
+                  </div>
+                  <button onClick={()=>{
+                    const entry = {id:Date.now(),type:"income",amount:uopDefaultSalary.brutto,category:"uop",note:"Wynagrodzenie UoP",date:new Date(selYear,selMonth,1).toISOString(),inputMode:"brutto"};
+                    setTxData(prev=>({...prev,[mk2]:[...(prev[mk2]||[]),entry]}));
+                  }} style={{padding:"8px 14px",borderRadius:10,background:"rgba(125,211,252,.2)",color:"#7dd3fc",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>
+                    + Dodaj
+                  </button>
+                </div>
+              );
+              return null;
+            })()}
             <div style={{background:isMobile?"none":"rgba(255,255,255,.02)",borderRadius:isMobile?0:14,padding:isMobile?0:20}}>
               {summary.entries.length===0 ? (
                 <div style={{textAlign:"center",padding:"50px 0",color:"#2a2a40"}}><div style={{fontSize:44,marginBottom:10}}>📋</div><div>Brak transakcji</div></div>
@@ -873,7 +935,7 @@ export default function App() {
               ); })}
             </div>
             <div style={{padding:isMobile?"20px 18px 0":"20px 0 0",display:"flex",justifyContent:isMobile?"center":"flex-start"}}>
-              <button onClick={()=>{setEditTarget(null);setTxForm({type:"expense",amount:"",category:"food",note:"",year:selYear,month:selMonth,reverseCharge:false,inputMode:"brutto"});setModal("addTx");}} style={{background:"linear-gradient(135deg,#2dd4bf,#14b8a6)",color:"#fff",borderRadius:16,padding:"14px 32px",fontSize:14,fontWeight:700}}>
+              <button onClick={()=>{setEditTarget(null);setTxForm({type:"expense",amount:"",category:"food",note:"",year:selYear,month:selMonth,reverseCharge:false,inputMode:"brutto",currency:"PLN",hoursWorked:""});setModal("addTx");}} style={{background:"linear-gradient(135deg,#2dd4bf,#14b8a6)",color:"#fff",borderRadius:16,padding:"14px 32px",fontSize:14,fontWeight:700}}>
                 + Dodaj transakcję
               </button>
             </div>
@@ -1258,6 +1320,94 @@ export default function App() {
               )}
             </div>
 
+            {/* UoP domyślne wynagrodzenie */}
+            <div className="card" style={{padding:"18px",marginBottom:14}}>
+              <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>💼 Domyślne wynagrodzenie UoP</div>
+              <div style={{fontSize:11,color:"#44445a",marginBottom:12}}>Autofill brutto dla każdego miesiąca (z możliwością edycji w miesiącu)</div>
+              <div style={{display:"flex",gap:8,marginBottom:10}}>
+                <div className="input-box" style={{flex:1}}>
+                  <span style={{fontSize:12,color:"#44445a",fontFamily:"monospace"}}>PLN brutto</span>
+                  <input type="number" inputMode="decimal" placeholder="np. 8000"
+                    value={uopDefaultSalary ? String(uopDefaultSalary.brutto) : ""}
+                    onChange={e=>setUopDefaultSalary(prev=>({...(prev||{validFromYear:now.getFullYear(),validFromMonth:now.getMonth()}),brutto:parseFloat(String(e.target.value).replace(",","."))||0}))}
+                    style={{flex:1,fontSize:16,fontWeight:600,fontFamily:"monospace"}}/>
+                </div>
+              </div>
+              <div style={{fontSize:11,color:"#44445a",marginBottom:6}}>Obowiązuje od:</div>
+              <div style={{display:"flex",gap:8,marginBottom:10}}>
+                <select className="select-box" style={{flex:2}}
+                  value={uopDefaultSalary ? uopDefaultSalary.validFromMonth : now.getMonth()}
+                  onChange={e=>setUopDefaultSalary(prev=>({...(prev||{brutto:0,validFromYear:now.getFullYear()}),validFromMonth:Number(e.target.value)}))}>
+                  {MONTHS_FULL.map((m,i)=><option key={i} value={i}>{m}</option>)}
+                </select>
+                <select className="select-box" style={{flex:1}}
+                  value={uopDefaultSalary ? uopDefaultSalary.validFromYear : now.getFullYear()}
+                  onChange={e=>setUopDefaultSalary(prev=>({...(prev||{brutto:0,validFromMonth:now.getMonth()}),validFromYear:Number(e.target.value)}))}>
+                  {YEARS.map(y=><option key={y} value={y}>{y}</option>)}
+                </select>
+              </div>
+              {uopDefaultSalary && uopDefaultSalary.brutto > 0 ? (
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",background:"rgba(125,211,252,.06)",borderRadius:10}}>
+                  <span style={{fontSize:12,color:"#7dd3fc"}}>✓ {fmtDec(uopDefaultSalary.brutto)} od {MONTHS_FULL[uopDefaultSalary.validFromMonth]} {uopDefaultSalary.validFromYear}</span>
+                  <button onClick={()=>setUopDefaultSalary(null)} style={{background:"rgba(248,113,113,.1)",color:"#f87171",borderRadius:8,padding:"4px 8px",fontSize:11,fontWeight:600}}>Usuń</button>
+                </div>
+              ) : (
+                <div style={{fontSize:11,color:"#2a2a40",textAlign:"center",padding:"6px 0"}}>Brak domyślnego wynagrodzenia</div>
+              )}
+            </div>
+
+            {/* Kontrakt JDG */}
+            <div className="card" style={{padding:"18px",marginBottom:14}}>
+              <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>📈 Kontrakt JDG (B2B)</div>
+              <div style={{fontSize:11,color:"#44445a",marginBottom:12}}>Godziny i stawka kontraktu B2B – podstawa do auto-kalkulacji przychodów</div>
+              <div style={{display:"flex",gap:8,marginBottom:10}}>
+                <div className="input-box" style={{flex:1}}>
+                  <span style={{fontSize:11,color:"#44445a"}}>h/mies.</span>
+                  <input type="number" inputMode="decimal" placeholder="np. 160"
+                    value={jdgContract ? String(jdgContract.hoursPerMonth) : ""}
+                    onChange={e=>setJdgContract(prev=>({...(prev||{ratePerHour:0,currency:"PLN"}),hoursPerMonth:parseFloat(String(e.target.value).replace(",","."))||0}))}
+                    style={{flex:1,fontSize:16,fontWeight:600,fontFamily:"monospace"}}/>
+                </div>
+                <div className="input-box" style={{flex:1}}>
+                  <span style={{fontSize:11,color:"#44445a"}}>stawka/h</span>
+                  <input type="number" inputMode="decimal" placeholder="np. 150"
+                    value={jdgContract ? String(jdgContract.ratePerHour) : ""}
+                    onChange={e=>setJdgContract(prev=>({...(prev||{hoursPerMonth:0,currency:"PLN"}),ratePerHour:parseFloat(String(e.target.value).replace(",","."))||0}))}
+                    style={{flex:1,fontSize:16,fontWeight:600,fontFamily:"monospace"}}/>
+                </div>
+              </div>
+              <div style={{fontSize:11,color:"#44445a",marginBottom:6}}>Waluta kontraktu:</div>
+              <div style={{display:"flex",gap:8,marginBottom:10}}>
+                {["PLN","EUR"].map(cur=>(
+                  <button key={cur} onClick={()=>setJdgContract(prev=>({...(prev||{hoursPerMonth:0,ratePerHour:0}),currency:cur}))}
+                    style={{flex:1,padding:"10px 8px",borderRadius:10,background:(jdgContract?.currency||"PLN")===cur?"rgba(125,211,252,.15)":"rgba(255,255,255,.04)",border:(jdgContract?.currency||"PLN")===cur?"1px solid rgba(125,211,252,.3)":"1px solid rgba(255,255,255,.08)",color:(jdgContract?.currency||"PLN")===cur?"#7dd3fc":"#666",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                    {cur === "PLN" ? "🇵🇱 PLN" : "🇪🇺 EUR"}
+                  </button>
+                ))}
+              </div>
+              {jdgContract?.currency === "EUR" && (
+                <div style={{marginBottom:10,padding:"8px 12px",background:"rgba(251,191,36,.06)",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+                  {eurRate ? <span style={{fontSize:12,color:"#fbbf24"}}>1 EUR = {eurRate.toFixed(4)} PLN (NBP {eurRateDate})</span>
+                  : <span style={{fontSize:12,color:"#44445a"}}>Brak kursu EUR/PLN</span>}
+                  <button onClick={fetchEurRate} style={{padding:"4px 8px",borderRadius:8,background:"rgba(251,191,36,.15)",color:"#fbbf24",fontSize:11,fontWeight:600}}>{eurRateLoading?"...":"↻ NBP"}</button>
+                </div>
+              )}
+              {jdgContract && jdgContract.hoursPerMonth > 0 && jdgContract.ratePerHour > 0 ? (
+                <div style={{padding:"10px 12px",background:"rgba(74,222,128,.06)",borderRadius:10,fontSize:12}}>
+                  <div style={{color:"#4ade80",fontWeight:600,marginBottom:3}}>{jdgContract.hoursPerMonth} h/mies. × {jdgContract.ratePerHour} {jdgContract.currency}/h</div>
+                  <div style={{color:"#44445a",fontSize:11}}>
+                    Mies. przychód:
+                    {jdgContract.currency === "EUR" && eurRate
+                      ? ` ${(jdgContract.hoursPerMonth * jdgContract.ratePerHour).toFixed(0)} EUR ≈ ${fmt(jdgContract.hoursPerMonth * jdgContract.ratePerHour * eurRate)}`
+                      : ` ${fmt(jdgContract.hoursPerMonth * jdgContract.ratePerHour)}`}
+                  </div>
+                  <button onClick={()=>setJdgContract(null)} style={{marginTop:8,background:"rgba(248,113,113,.1)",color:"#f87171",borderRadius:8,padding:"4px 8px",fontSize:11,fontWeight:600}}>Usuń kontrakt</button>
+                </div>
+              ) : (
+                <div style={{fontSize:11,color:"#2a2a40",textAlign:"center",padding:"6px 0"}}>Brak skonfigurowanego kontraktu JDG</div>
+              )}
+            </div>
+
             {/* Podsumowanie */}
             <div style={{padding:"14px 16px",background:"rgba(255,255,255,.03)",borderRadius:14,border:"1px solid rgba(255,255,255,.07)",fontSize:12}}>
               <div style={{color:"#44445a",marginBottom:10,fontWeight:600,textTransform:"uppercase",letterSpacing:".08em",fontSize:10}}>Podsumowanie profilu</div>
@@ -1460,6 +1610,179 @@ export default function App() {
             </div>
           </div>
         )}
+        {/* JDG CALENDAR */}
+        {tab==="jdg_calendar" && (
+          <div style={{padding:isMobile?"56px 18px 120px":"40px",maxWidth:1200,margin:"0 auto"}}>
+            <div style={{fontSize:isMobile?18:24,fontWeight:700,marginBottom:6}}>Kalendarz kontraktu JDG</div>
+            <div style={{fontSize:isMobile?11:13,color:"#44445a",marginBottom:20}}>Śledzenie godzin względem kontraktu B2B</div>
+
+            {!jdgContract || !jdgContract.hoursPerMonth ? (
+              <div className="card" style={{padding:"40px 20px",textAlign:"center",color:"#44445a"}}>
+                <div style={{fontSize:40,marginBottom:12}}>📋</div>
+                <div style={{fontSize:16,fontWeight:600,marginBottom:8,color:"#eeeaf4"}}>Brak kontraktu JDG</div>
+                <div style={{fontSize:13,marginBottom:16}}>Skonfiguruj kontrakt w ustawieniach</div>
+                <button onClick={()=>setTab("settings")} style={{padding:"12px 24px",borderRadius:14,background:"rgba(125,211,252,.15)",color:"#7dd3fc",fontSize:13,fontWeight:700,border:"1px solid rgba(125,211,252,.3)"}}>
+                  → Profil / Ustawienia
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Contract summary */}
+                <div className="card" style={{padding:"16px",marginBottom:16}}>
+                  <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
+                    {[
+                      {label:"Godziny/mies.",val:`${jdgContract.hoursPerMonth} h`,cls:"blue"},
+                      {label:"Stawka",val:`${jdgContract.ratePerHour} ${jdgContract.currency}/h`,cls:"amber"},
+                      {label:"Mies. przychód",val:jdgContract.currency==="EUR"&&eurRate?`${(jdgContract.hoursPerMonth*jdgContract.ratePerHour).toFixed(0)} EUR`:fmt(jdgContract.hoursPerMonth*jdgContract.ratePerHour),cls:"green"},
+                      {label:jdgContract.currency==="EUR"&&eurRate?"W PLN (approx)":"Stawka waluta",val:jdgContract.currency==="EUR"&&eurRate?fmt(jdgContract.hoursPerMonth*jdgContract.ratePerHour*eurRate):jdgContract.currency,cls:"violet"},
+                    ].map((item,i)=>(
+                      <div key={i} style={{background:"rgba(0,0,0,.3)",borderRadius:12,padding:"12px 10px",textAlign:"center"}}>
+                        <div style={{fontSize:9,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:4}}>{item.label}</div>
+                        <div className={item.cls} style={{fontSize:isMobile?12:14,fontWeight:700}}>{item.val}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {jdgContract.currency==="EUR" && (
+                    <div style={{marginTop:10,padding:"6px 10px",background:"rgba(251,191,36,.06)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+                      {eurRate ? <span style={{fontSize:11,color:"#fbbf24"}}>Kurs NBP: 1 EUR = {eurRate.toFixed(4)} PLN ({eurRateDate})</span>
+                      : <span style={{fontSize:11,color:"#44445a"}}>Brak kursu EUR – pobierz poniżej</span>}
+                      <button onClick={fetchEurRate} style={{padding:"3px 8px",borderRadius:7,background:"rgba(251,191,36,.15)",color:"#fbbf24",fontSize:10,fontWeight:600}}>{eurRateLoading?"...":"↻ NBP"}</button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Year selector */}
+                <div style={{display:"flex",gap:6,marginBottom:16}}>
+                  {YEARS.map(y=><button key={y} onClick={()=>setSelYear(y)} style={{padding:"8px 14px",borderRadius:10,background:selYear===y?"rgba(125,211,252,.15)":"rgba(255,255,255,.04)",color:selYear===y?"#7dd3fc":"#666",fontSize:12,fontWeight:600}}>{y}</button>)}
+                </div>
+
+                {/* Monthly hours grid */}
+                <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10,marginBottom:20}}>
+                  {Array.from({length:12},(_,m)=>{
+                    const mk = monthKey(selYear,m);
+                    const workedManual = jdgMonthlyHours[mk] || 0;
+                    const workedEntries = getMonthEntries(selYear,m).filter(e=>e.category==="jdg_ryczalt"&&e.hoursWorked).reduce((s,e)=>s+(e.hoursWorked||0),0);
+                    const worked = Math.max(workedManual,workedEntries);
+                    const contracted = jdgContract.hoursPerMonth;
+                    const pct = contracted > 0 ? Math.min(100,(worked/contracted)*100) : 0;
+                    const isCurMonth = m===now.getMonth()&&selYear===now.getFullYear();
+                    const isDone = worked >= contracted && contracted > 0;
+                    const isSelected = m === selMonth;
+                    return (
+                      <div key={m} onClick={()=>setSelMonth(m)} style={{
+                        background:isSelected?"rgba(125,211,252,.1)":isCurMonth?"rgba(125,211,252,.04)":"rgba(255,255,255,.03)",
+                        border:isSelected?"1px solid rgba(125,211,252,.4)":isCurMonth?"1px solid rgba(125,211,252,.2)":"1px solid rgba(255,255,255,.05)",
+                        borderRadius:14,padding:"12px 10px",cursor:"pointer",transition:"all .2s"
+                      }}>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                          <div style={{fontSize:12,fontWeight:700,color:isSelected?"#7dd3fc":isCurMonth?"#7dd3fc":"#eeeaf4"}}>{MONTHS_SHORT[m]}</div>
+                          <div style={{fontSize:12}}>{isDone?"✅":worked>0?"⏳":"·"}</div>
+                        </div>
+                        <div style={{height:4,background:"rgba(255,255,255,.06)",borderRadius:999,overflow:"hidden",marginBottom:5}}>
+                          <div style={{height:"100%",width:`${pct}%`,background:isDone?"linear-gradient(90deg,#4ade80,#22c55e)":worked>0?"linear-gradient(90deg,#7dd3fc,#38bdf8)":"transparent",borderRadius:999}}/>
+                        </div>
+                        <div style={{fontSize:10,color:"#44445a"}}>{worked} / {contracted} h</div>
+                        {isCurMonth && !isDone && worked > 0 && (()=>{
+                          const dayOfMonth = now.getDate();
+                          const dailyPace = worked / dayOfMonth;
+                          const remaining = contracted - worked;
+                          const daysNeeded = dailyPace > 0 ? Math.ceil(remaining / dailyPace) : null;
+                          if(!daysNeeded) return null;
+                          const cd = new Date(now); cd.setDate(now.getDate()+daysNeeded);
+                          const isThisMonth = cd.getMonth()===m && cd.getFullYear()===selYear;
+                          return <div style={{marginTop:4,fontSize:10,color:"#a78bfa",fontWeight:600}}>📅 {isThisMonth?`~${cd.getDate()} ${MONTHS_SHORT[m]}`:"nast. mies."}</div>;
+                        })()}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Selected month detail */}
+                {(()=>{
+                  const mk = monthKey(selYear,selMonth);
+                  const workedManual = jdgMonthlyHours[mk] !== undefined ? jdgMonthlyHours[mk] : 0;
+                  const workedFromEntries = getMonthEntries(selYear,selMonth).filter(e=>e.category==="jdg_ryczalt"&&e.hoursWorked).reduce((s,e)=>s+(e.hoursWorked||0),0);
+                  const worked = Math.max(workedManual,workedFromEntries);
+                  const contracted = jdgContract.hoursPerMonth;
+                  const pct = contracted > 0 ? Math.min(100,(worked/contracted)*100) : 0;
+                  const isCurrentMonth = selMonth===now.getMonth()&&selYear===now.getFullYear();
+                  const remaining = Math.max(0,contracted-worked);
+                  const dailyPace = isCurrentMonth && worked > 0 ? worked / now.getDate() : 0;
+                  const daysNeeded = dailyPace > 0 ? Math.ceil(remaining/dailyPace) : null;
+                  const completionDate = daysNeeded !== null ? new Date(now.getFullYear(),now.getMonth(),now.getDate()+daysNeeded) : null;
+                  const rateInPln = jdgContract.ratePerHour * (jdgContract.currency==="EUR"&&eurRate ? eurRate : 1);
+                  return (
+                    <div className="card" style={{padding:"20px"}}>
+                      <div style={{fontSize:14,fontWeight:700,marginBottom:16,color:"#7dd3fc"}}>{MONTHS_FULL[selMonth]} {selYear} – szczegóły</div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14}}>
+                        {[
+                          {label:"Przepracowane",val:`${worked} h`,cls:"green"},
+                          {label:"Pozostało",val:`${remaining} h`,cls:remaining>0?"amber":"green"},
+                          {label:"Postęp",val:`${Math.round(pct)}%`,cls:pct>=100?"green":"blue"},
+                        ].map((x,i)=>(
+                          <div key={i} style={{background:"rgba(0,0,0,.3)",borderRadius:12,padding:"10px 8px",textAlign:"center"}}>
+                            <div style={{fontSize:9,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:3}}>{x.label}</div>
+                            <div className={x.cls} style={{fontSize:isMobile?13:16,fontWeight:700}}>{x.val}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{height:10,background:"rgba(255,255,255,.06)",borderRadius:999,overflow:"hidden",marginBottom:14}}>
+                        <div style={{height:"100%",width:`${pct}%`,background:pct>=100?"linear-gradient(90deg,#4ade80,#22c55e)":"linear-gradient(90deg,#7dd3fc,#38bdf8)",borderRadius:999,transition:"width .5s"}}/>
+                      </div>
+                      {isCurrentMonth && worked > 0 && remaining > 0 && completionDate && (
+                        <div style={{padding:"14px",background:"rgba(167,139,250,.08)",borderRadius:12,border:"1px solid rgba(167,139,250,.2)",marginBottom:14}}>
+                          <div style={{fontSize:11,color:"#a78bfa",textTransform:"uppercase",letterSpacing:".08em",fontWeight:600,marginBottom:6}}>📅 Szacowana data wyrobienia kontraktu</div>
+                          <div style={{fontSize:isMobile?20:26,fontWeight:800,color:"#fff",marginBottom:4}}>
+                            {completionDate.toLocaleDateString("pl-PL",{day:"numeric",month:"long",year:"numeric"})}
+                          </div>
+                          <div style={{fontSize:11,color:"#a78bfa",opacity:.8}}>
+                            Tempo: {dailyPace.toFixed(1)} h/dzień · Pozostało: {remaining} h · ~{daysNeeded} {daysNeeded===1?"dzień":"dni"}
+                          </div>
+                        </div>
+                      )}
+                      {worked > 0 && (
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+                          <div style={{padding:"10px 12px",background:"rgba(74,222,128,.06)",borderRadius:10}}>
+                            <div style={{fontSize:10,color:"#44445a",marginBottom:3}}>Zarobiono</div>
+                            <div style={{fontSize:14,fontWeight:700,color:"#4ade80",fontFamily:"monospace"}}>
+                              {jdgContract.currency==="EUR"&&eurRate?`${(worked*jdgContract.ratePerHour).toFixed(0)} EUR ≈ ${fmt(worked*rateInPln)}`:fmt(worked*rateInPln)}
+                            </div>
+                          </div>
+                          <div style={{padding:"10px 12px",background:remaining>0?"rgba(255,255,255,.04)":"rgba(74,222,128,.06)",borderRadius:10}}>
+                            <div style={{fontSize:10,color:"#44445a",marginBottom:3}}>Status kontraktu</div>
+                            <div style={{fontSize:13,fontWeight:700,color:remaining>0?"#fbbf24":"#4ade80"}}>
+                              {remaining>0?`Brakuje ${remaining} h`:"✅ Kontrakt wypełniony"}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      {isCurrentMonth && worked===0 && (
+                        <div style={{padding:"10px 12px",background:"rgba(255,255,255,.04)",borderRadius:10,fontSize:12,color:"#44445a",textAlign:"center",marginBottom:14}}>
+                          Brak godzin dla tego miesiąca – wpisz poniżej
+                        </div>
+                      )}
+                      {/* Manual hours input */}
+                      <div style={{paddingTop:14,borderTop:"1px solid rgba(255,255,255,.06)"}}>
+                        <div style={{fontSize:12,color:"#44445a",marginBottom:8}}>Godziny dla {MONTHS_SHORT[selMonth]} {selYear}:</div>
+                        <div className="input-box">
+                          <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>h</span>
+                          <input type="number" inputMode="decimal" placeholder={`z ${contracted}`}
+                            value={jdgMonthlyHours[mk]!==undefined?String(jdgMonthlyHours[mk]):(workedFromEntries>0?String(workedFromEntries):"")}
+                            onChange={e=>{
+                              const v = parseFloat(String(e.target.value).replace(",","."));
+                              setJdgMonthlyHours(prev=>({...prev,[mk]:isNaN(v)?0:v}));
+                            }}
+                            style={{flex:1,fontSize:20,fontWeight:700,fontFamily:"monospace"}}/>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </>
+            )}
+          </div>
+        )}
+
       </div>
 
       {/* MOBILE BOTTOM NAV */}
@@ -1518,6 +1841,70 @@ export default function App() {
                     {YEARS.map(y=><option key={y} value={y}>{y}</option>)}
                   </select>
                 </div>)}
+
+                {/* EUR currency toggle for income */}
+                {txForm.type==="income" && (
+                  <div style={{marginBottom:14}}>
+                    <div style={{fontSize:12,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>Waluta</div>
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={()=>setTxForm(f=>({...f,currency:"PLN"}))} style={{flex:1,padding:"10px 8px",borderRadius:10,background:txForm.currency==="PLN"?"rgba(125,211,252,.15)":"rgba(255,255,255,.04)",color:txForm.currency==="PLN"?"#7dd3fc":"#44445a",fontSize:12,fontWeight:600,border:txForm.currency==="PLN"?"1px solid rgba(125,211,252,.3)":"1px solid rgba(255,255,255,.1)",cursor:"pointer"}}>🇵🇱 PLN</button>
+                      <button onClick={()=>{setTxForm(f=>({...f,currency:"EUR"}));if(!eurRate&&!eurRateLoading)fetchEurRate();}} style={{flex:1,padding:"10px 8px",borderRadius:10,background:txForm.currency==="EUR"?"rgba(251,191,36,.15)":"rgba(255,255,255,.04)",color:txForm.currency==="EUR"?"#fbbf24":"#44445a",fontSize:12,fontWeight:600,border:txForm.currency==="EUR"?"1px solid rgba(251,191,36,.3)":"1px solid rgba(255,255,255,.1)",cursor:"pointer"}}>🇪🇺 EUR</button>
+                    </div>
+                    {txForm.currency==="EUR" && (
+                      <div style={{marginTop:8,padding:"8px 12px",background:"rgba(251,191,36,.06)",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                        {eurRateLoading ? <span style={{fontSize:12,color:"#fbbf24"}}>Pobieranie kursu NBP…</span>
+                        : eurRate ? <span style={{fontSize:12,color:"#fbbf24"}}>1 EUR = <strong>{eurRate.toFixed(4)} PLN</strong> (NBP {eurRateDate})</span>
+                        : <span style={{fontSize:12,color:"#44445a"}}>Brak kursu – kliknij ↓</span>}
+                        <button onClick={fetchEurRate} style={{padding:"4px 8px",borderRadius:8,background:"rgba(251,191,36,.15)",color:"#fbbf24",fontSize:11,fontWeight:600}}>{eurRateLoading?"...": "↻ Odśwież"}</button>
+                      </div>
+                    )}
+                    {txForm.currency==="EUR" && eurRate && txForm.amount && parseFloat(txForm.amount) > 0 && (
+                      <div style={{marginTop:6,fontSize:12,color:"#7dd3fc",textAlign:"right"}}>
+                        ≈ {fmt(parseFloat(String(txForm.amount).replace(",",".")) * eurRate)} PLN
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* JDG hours worked */}
+                {txForm.type==="income" && txForm.category==="jdg_ryczalt" && (
+                  <div style={{marginBottom:14}}>
+                    <div style={{fontSize:12,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>Przepracowane godziny (opcj.)</div>
+                    {jdgContract && jdgContract.hoursPerMonth > 0 ? (
+                      <div>
+                        <div className="input-box" style={{marginBottom:4}}>
+                          <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>h</span>
+                          <input type="number" inputMode="decimal" placeholder={`z ${jdgContract.hoursPerMonth} h/mies.`}
+                            value={txForm.hoursWorked}
+                            onChange={e=>{
+                              const hw = e.target.value;
+                              setTxForm(f=>{
+                                const hwNum = parseFloat(String(hw).replace(",",".")) || 0;
+                                const rate = parseFloat(jdgContract.ratePerHour) || 0;
+                                let computedAmt = f.amount;
+                                if(hwNum > 0 && rate > 0) {
+                                  const rateInPln = jdgContract.currency === "EUR" && eurRate ? rate * eurRate : rate;
+                                  computedAmt = String(Math.round(hwNum * rateInPln * 100) / 100);
+                                }
+                                return {...f, hoursWorked: hw, amount: computedAmt};
+                              });
+                            }}
+                            style={{flex:1,fontSize:18,fontWeight:700,fontFamily:"monospace"}}/>
+                        </div>
+                        {txForm.hoursWorked && parseFloat(txForm.hoursWorked) > 0 && (
+                          <div style={{fontSize:11,color:"#4ade80",textAlign:"right"}}>
+                            {parseFloat(txForm.hoursWorked)} / {jdgContract.hoursPerMonth} h
+                            {jdgContract.currency==="EUR" && eurRate && ` · ${jdgContract.ratePerHour} EUR/h → ${(jdgContract.ratePerHour * eurRate).toFixed(2)} PLN/h`}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{padding:"8px 12px",background:"rgba(255,255,255,.04)",borderRadius:10,fontSize:12,color:"#44445a"}}>
+                        Skonfiguruj kontrakt JDG w <button onClick={()=>{setModal(null);setTab("settings");}} style={{background:"none",color:"#7dd3fc",fontSize:12,cursor:"pointer",textDecoration:"underline"}}>Profilu</button>.
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {txForm.type==="income" && txForm.amount && CAT_INCOME.find(c=>c.id===txForm.category)?.isTaxed && (()=>{
                   const ytd = computeYtdContext(txForm.year, txForm.month);
@@ -1583,7 +1970,7 @@ export default function App() {
                 })()}
 
                 <div className="input-box" style={{marginBottom:6}}>
-                  <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>PLN</span>
+                  <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>{txForm.type==="income"&&txForm.currency==="EUR"?"EUR":"PLN"}</span>
                   <input type="number" inputMode="decimal" placeholder="0,00" value={txForm.amount} onChange={e=>setTxForm(f=>({...f,amount:e.target.value}))} style={{flex:1,fontSize:isMobile?20:26,fontWeight:700,fontFamily:"monospace"}}/>
                 </div>
 
