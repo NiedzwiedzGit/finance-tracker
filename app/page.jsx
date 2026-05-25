@@ -2025,7 +2025,8 @@ export default function App() {
                 {txForm.type==="income" && txForm.amount && CAT_INCOME.find(c=>c.id===txForm.category)?.isTaxed && (()=>{
                   const ytd = computeYtdContext(txForm.year, txForm.month);
                   const cat = getCat("income", txForm.category);
-                  const amt = parseFloat(String(txForm.amount).replace(",","."));
+                  const rawAmt = parseFloat(String(txForm.amount).replace(",","."));
+                  const amt = (txForm.currency === "EUR" && eurRate && rawAmt > 0) ? rawAmt * eurRate : rawAmt;
                   if (!amt || amt <= 0) return null;
                   let r = null;
                   if (txForm.inputMode === "brutto") {
