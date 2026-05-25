@@ -177,7 +177,7 @@ export default function App() {
   const [goals, setGoals] = useState(() => load("fin3_goals", []));
   const [modal, setModal] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
-  const [txForm, setTxForm] = useState({type:"expense",amount:"",category:"food",note:"",year:now.getFullYear(),month:now.getMonth(),reverseCharge:false,inputMode:"brutto",currency:"PLN",hoursWorked:""});
+  const [txForm, setTxForm] = useState({type:"expense",amount:"",category:"food",note:"",year:now.getFullYear(),month:now.getMonth(),reverseCharge:false,inputMode:"brutto",currency:"PLN",hoursWorked:"",jdgInputMode:"kwota"});
   const [recurForm, setRecurForm] = useState({label:"",amount:"",category:"bills",icon:"📄",startYear:now.getFullYear(),startMonth:now.getMonth()});
   const [goalForm, setGoalForm] = useState({name:"",icon:"🏠",target:"",saved:"",deadline:""});
   const [savingForm, setSavingForm] = useState({goalId:"",amount:"",sourceIncome:"other_in"});
@@ -302,6 +302,19 @@ export default function App() {
     setBackupPassword(pwd);
     setShowPassword(true);
     setBackupStatus("⚠️ Zapisz to haslo!");
+  };
+
+  const getJdgRateInfo = () => {
+    if (!jdgContract || !jdgContract.totalValue || !jdgContract.totalHours) return null;
+    const sYear = jdgContract.periodStartYear ?? now.getFullYear();
+    const sMonth = jdgContract.periodStartMonth ?? now.getMonth();
+    const eYear = jdgContract.periodEndYear ?? now.getFullYear();
+    const eMonth = jdgContract.periodEndMonth ?? 11;
+    const months = Math.max(1, (eYear - sYear) * 12 + (eMonth - sMonth) + 1);
+    const ratePerHour = jdgContract.totalValue / jdgContract.totalHours;
+    const hoursPerMonth = Math.round(jdgContract.totalHours / months * 10) / 10;
+    const rateInPln = jdgContract.currency === "EUR" && eurRate ? ratePerHour * eurRate : ratePerHour;
+    return { ratePerHour, hoursPerMonth, months, rateInPln };
   };
 
   const fetchEurRate = async () => {
@@ -618,9 +631,11 @@ export default function App() {
     const cat = getCat("income",txForm.category);
     const hoursWorkedNum = parseFloat(String(txForm.hoursWorked).replace(",",".")) || 0;
     // JDG hours → auto-calculate amount from contract rate
-    if(txForm.type==="income" && txForm.category==="jdg_ryczalt" && hoursWorkedNum > 0 && jdgContract && parseFloat(jdgContract.ratePerHour) > 0) {
-      const rate = parseFloat(jdgContract.ratePerHour);
-      rawAmt = hoursWorkedNum * (jdgContract.currency === "EUR" && eurRate ? rate * eurRate : rate);
+    if(txForm.type==="income" && txForm.category==="jdg_ryczalt" && hoursWorkedNum > 0 && jdgContract && jdgContract.totalHours) {
+      const ri = getJdgRateInfo();
+      if(ri) {
+        rawAmt = hoursWorkedNum * (jdgContract.currency === "EUR" && eurRate ? ri.ratePerHour * eurRate : ri.ratePerHour);
+      }
     } else if(txForm.currency === "EUR" && eurRate && rawAmt > 0) {
       rawAmt = rawAmt * eurRate;
     }
@@ -705,7 +720,7 @@ export default function App() {
   const openEditTx = (entry) => {
     if(entry.isRecurring) return;
     setEditTarget(entry);
-    setTxForm({type:entry.type,amount:entry.currencyOrig==="EUR"?String(entry.amtEur||entry.amount):String(entry.amount),category:entry.category,note:entry.note||"",year:selYear,month:selMonth,reverseCharge:entry.reverseCharge||false,inputMode:entry.inputMode||"brutto",currency:entry.currencyOrig||"PLN",hoursWorked:entry.hoursWorked?String(entry.hoursWorked):""});
+    setTxForm({type:entry.type,amount:entry.currencyOrig==="EUR"?String(entry.amtEur||entry.amount):String(entry.amount),category:entry.category,note:entry.note||"",year:selYear,month:selMonth,reverseCharge:entry.reverseCharge||false,inputMode:entry.inputMode||"brutto",currency:entry.currencyOrig||"PLN",hoursWorked:entry.hoursWorked?String(entry.hoursWorked):"",jdgInputMode:entry.hoursWorked?"godziny":"kwota"});
     setModal("addTx");
   };
   const openEditRecur = (r) => { setEditTarget(r); setRecurForm({label:r.label,amount:String(r.amount),category:r.category,icon:r.icon,startYear:r.startYear,startMonth:r.startMonth}); setModal("addRecur"); };
@@ -1359,53 +1374,122 @@ export default function App() {
             {/* Kontrakt JDG */}
             <div className="card" style={{padding:"18px",marginBottom:14}}>
               <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>📈 Kontrakt JDG (B2B)</div>
-              <div style={{fontSize:11,color:"#44445a",marginBottom:12}}>Godziny i stawka kontraktu B2B – podstawa do auto-kalkulacji przychodów</div>
-              <div style={{display:"flex",gap:8,marginBottom:10}}>
-                <div className="input-box" style={{flex:1}}>
-                  <span style={{fontSize:11,color:"#44445a"}}>h/mies.</span>
-                  <input type="number" inputMode="decimal" placeholder="np. 160"
-                    value={jdgContract ? String(jdgContract.hoursPerMonth) : ""}
-                    onChange={e=>setJdgContract(prev=>({...(prev||{ratePerHour:0,currency:"PLN"}),hoursPerMonth:parseFloat(String(e.target.value).replace(",","."))||0}))}
-                    style={{flex:1,fontSize:16,fontWeight:600,fontFamily:"monospace"}}/>
-                </div>
-                <div className="input-box" style={{flex:1}}>
-                  <span style={{fontSize:11,color:"#44445a"}}>stawka/h</span>
-                  <input type="number" inputMode="decimal" placeholder="np. 150"
-                    value={jdgContract ? String(jdgContract.ratePerHour) : ""}
-                    onChange={e=>setJdgContract(prev=>({...(prev||{hoursPerMonth:0,currency:"PLN"}),ratePerHour:parseFloat(String(e.target.value).replace(",","."))||0}))}
-                    style={{flex:1,fontSize:16,fontWeight:600,fontFamily:"monospace"}}/>
-                </div>
-              </div>
+              <div style={{fontSize:11,color:"#44445a",marginBottom:14}}>Podaj wartość i godziny kontraktu – stawka/h zostanie wyliczona automatycznie</div>
+
+              {/* Waluta */}
               <div style={{fontSize:11,color:"#44445a",marginBottom:6}}>Waluta kontraktu:</div>
-              <div style={{display:"flex",gap:8,marginBottom:10}}>
+              <div style={{display:"flex",gap:8,marginBottom:14}}>
                 {["PLN","EUR"].map(cur=>(
-                  <button key={cur} onClick={()=>setJdgContract(prev=>({...(prev||{hoursPerMonth:0,ratePerHour:0}),currency:cur}))}
+                  <button key={cur} onClick={()=>setJdgContract(prev=>({...(prev||{totalValue:0,totalHours:0,periodStartYear:now.getFullYear(),periodStartMonth:now.getMonth(),periodEndYear:now.getFullYear(),periodEndMonth:11}),currency:cur}))}
                     style={{flex:1,padding:"10px 8px",borderRadius:10,background:(jdgContract?.currency||"PLN")===cur?"rgba(125,211,252,.15)":"rgba(255,255,255,.04)",border:(jdgContract?.currency||"PLN")===cur?"1px solid rgba(125,211,252,.3)":"1px solid rgba(255,255,255,.08)",color:(jdgContract?.currency||"PLN")===cur?"#7dd3fc":"#666",fontSize:13,fontWeight:700,cursor:"pointer"}}>
                     {cur === "PLN" ? "🇵🇱 PLN" : "🇪🇺 EUR"}
                   </button>
                 ))}
               </div>
+
+              {/* Wartość i godziny */}
+              <div style={{display:"flex",gap:8,marginBottom:14}}>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:10,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:5}}>Wartość kontraktu</div>
+                  <div className="input-box">
+                    <span style={{fontSize:11,color:"#44445a"}}>{jdgContract?.currency||"PLN"}</span>
+                    <input type="number" inputMode="decimal" placeholder="np. 100000"
+                      value={jdgContract ? String(jdgContract.totalValue||"") : ""}
+                      onChange={e=>setJdgContract(prev=>({...(prev||{totalHours:0,currency:"PLN",periodStartYear:now.getFullYear(),periodStartMonth:now.getMonth(),periodEndYear:now.getFullYear(),periodEndMonth:11}),totalValue:parseFloat(String(e.target.value).replace(",","."))||0}))}
+                      style={{flex:1,fontSize:15,fontWeight:700,fontFamily:"monospace"}}/>
+                  </div>
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:10,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:5}}>Łączne godz. (kontrakt)</div>
+                  <div className="input-box">
+                    <span style={{fontSize:11,color:"#44445a"}}>h</span>
+                    <input type="number" inputMode="decimal" placeholder="np. 1920"
+                      value={jdgContract ? String(jdgContract.totalHours||"") : ""}
+                      onChange={e=>setJdgContract(prev=>({...(prev||{totalValue:0,currency:"PLN",periodStartYear:now.getFullYear(),periodStartMonth:now.getMonth(),periodEndYear:now.getFullYear(),periodEndMonth:11}),totalHours:parseFloat(String(e.target.value).replace(",","."))||0}))}
+                      style={{flex:1,fontSize:15,fontWeight:700,fontFamily:"monospace"}}/>
+                  </div>
+                </div>
+              </div>
+
+              {/* Okres kontraktu */}
+              <div style={{fontSize:10,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>Okres kontraktu (od – do):</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+                <div>
+                  <div style={{fontSize:10,color:"#555",marginBottom:4}}>Od:</div>
+                  <div style={{display:"flex",gap:4}}>
+                    <select className="select-box" style={{flex:2,fontSize:12,padding:"10px 8px"}}
+                      value={jdgContract?.periodStartMonth ?? now.getMonth()}
+                      onChange={e=>setJdgContract(prev=>({...(prev||{totalValue:0,totalHours:0,currency:"PLN",periodEndYear:now.getFullYear(),periodEndMonth:11}),periodStartMonth:Number(e.target.value)}))}>
+                      {MONTHS_SHORT.map((m,i)=><option key={i} value={i}>{m}</option>)}
+                    </select>
+                    <select className="select-box" style={{flex:1,fontSize:12,padding:"10px 8px"}}
+                      value={jdgContract?.periodStartYear ?? now.getFullYear()}
+                      onChange={e=>setJdgContract(prev=>({...(prev||{totalValue:0,totalHours:0,currency:"PLN",periodEndMonth:11}),periodStartYear:Number(e.target.value)}))}>
+                      {YEARS.map(y=><option key={y} value={y}>{y}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <div style={{fontSize:10,color:"#555",marginBottom:4}}>Do:</div>
+                  <div style={{display:"flex",gap:4}}>
+                    <select className="select-box" style={{flex:2,fontSize:12,padding:"10px 8px"}}
+                      value={jdgContract?.periodEndMonth ?? 11}
+                      onChange={e=>setJdgContract(prev=>({...(prev||{totalValue:0,totalHours:0,currency:"PLN",periodStartYear:now.getFullYear(),periodStartMonth:now.getMonth()}),periodEndMonth:Number(e.target.value)}))}>
+                      {MONTHS_SHORT.map((m,i)=><option key={i} value={i}>{m}</option>)}
+                    </select>
+                    <select className="select-box" style={{flex:1,fontSize:12,padding:"10px 8px"}}
+                      value={jdgContract?.periodEndYear ?? now.getFullYear()}
+                      onChange={e=>setJdgContract(prev=>({...(prev||{totalValue:0,totalHours:0,currency:"PLN",periodStartMonth:now.getMonth()}),periodEndYear:Number(e.target.value)}))}>
+                      {YEARS.map(y=><option key={y} value={y}>{y}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* EUR rate */}
               {jdgContract?.currency === "EUR" && (
-                <div style={{marginBottom:10,padding:"8px 12px",background:"rgba(251,191,36,.06)",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+                <div style={{marginBottom:12,padding:"8px 12px",background:"rgba(251,191,36,.06)",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
                   {eurRate ? <span style={{fontSize:12,color:"#fbbf24"}}>1 EUR = {eurRate.toFixed(4)} PLN (NBP {eurRateDate})</span>
                   : <span style={{fontSize:12,color:"#44445a"}}>Brak kursu EUR/PLN</span>}
                   <button onClick={fetchEurRate} style={{padding:"4px 8px",borderRadius:8,background:"rgba(251,191,36,.15)",color:"#fbbf24",fontSize:11,fontWeight:600}}>{eurRateLoading?"...":"↻ NBP"}</button>
                 </div>
               )}
-              {jdgContract && jdgContract.hoursPerMonth > 0 && jdgContract.ratePerHour > 0 ? (
-                <div style={{padding:"10px 12px",background:"rgba(74,222,128,.06)",borderRadius:10,fontSize:12}}>
-                  <div style={{color:"#4ade80",fontWeight:600,marginBottom:3}}>{jdgContract.hoursPerMonth} h/mies. × {jdgContract.ratePerHour} {jdgContract.currency}/h</div>
-                  <div style={{color:"#44445a",fontSize:11}}>
-                    Mies. przychód:
-                    {jdgContract.currency === "EUR" && eurRate
-                      ? ` ${(jdgContract.hoursPerMonth * jdgContract.ratePerHour).toFixed(0)} EUR ≈ ${fmt(jdgContract.hoursPerMonth * jdgContract.ratePerHour * eurRate)}`
-                      : ` ${fmt(jdgContract.hoursPerMonth * jdgContract.ratePerHour)}`}
+
+              {/* Computed summary */}
+              {(()=>{
+                if(!jdgContract || !jdgContract.totalValue || !jdgContract.totalHours) return (
+                  <div style={{fontSize:11,color:"#2a2a40",textAlign:"center",padding:"6px 0"}}>Uzupełnij wartość i godziny aby zobaczyć stawkę</div>
+                );
+                const rate = jdgContract.totalValue / jdgContract.totalHours;
+                const sYear = jdgContract.periodStartYear ?? now.getFullYear();
+                const sMonth = jdgContract.periodStartMonth ?? now.getMonth();
+                const eYear = jdgContract.periodEndYear ?? now.getFullYear();
+                const eMonth = jdgContract.periodEndMonth ?? 11;
+                const months = Math.max(1, (eYear - sYear) * 12 + (eMonth - sMonth) + 1);
+                const hoursPerMonth = Math.round(jdgContract.totalHours / months * 10) / 10;
+                const rateInPln = jdgContract.currency === "EUR" && eurRate ? rate * eurRate : rate;
+                return (
+                  <div style={{padding:"14px",background:"rgba(74,222,128,.06)",border:"1px solid rgba(74,222,128,.15)",borderRadius:12}}>
+                    <div style={{fontSize:11,color:"#4ade80",textTransform:"uppercase",letterSpacing:".08em",fontWeight:600,marginBottom:10}}>✓ Wyliczone parametry kontraktu</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:"5px 12px",fontSize:12}}>
+                      <div style={{color:"#888"}}>Stawka godzinowa</div>
+                      <div style={{fontFamily:"monospace",fontWeight:700,color:"#4ade80",textAlign:"right"}}>
+                        {rate.toFixed(2)} {jdgContract.currency}/h
+                        {jdgContract.currency==="EUR"&&eurRate?` ≈ ${(rate*eurRate).toFixed(2)} PLN/h`:""}
+                      </div>
+                      <div style={{color:"#888"}}>Okres kontraktu</div>
+                      <div style={{fontWeight:600,color:"#7dd3fc",textAlign:"right"}}>{months} mies.</div>
+                      <div style={{color:"#888"}}>Godziny / mies. (śr.)</div>
+                      <div style={{fontFamily:"monospace",fontWeight:600,color:"#7dd3fc",textAlign:"right"}}>{hoursPerMonth} h</div>
+                      <div style={{color:"#888",paddingTop:5,borderTop:"1px solid rgba(255,255,255,.06)"}}>Mies. przychód (śr.)</div>
+                      <div style={{fontFamily:"monospace",fontWeight:700,color:"#fbbf24",textAlign:"right",paddingTop:5,borderTop:"1px solid rgba(255,255,255,.06)"}}>
+                        {jdgContract.currency==="EUR"&&eurRate?`${(hoursPerMonth*rate).toFixed(0)} EUR ≈ ${fmt(hoursPerMonth*rateInPln)}`:fmt(hoursPerMonth*rateInPln)}
+                      </div>
+                    </div>
+                    <button onClick={()=>setJdgContract(null)} style={{marginTop:12,background:"rgba(248,113,113,.1)",color:"#f87171",borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:600}}>Usuń kontrakt</button>
                   </div>
-                  <button onClick={()=>setJdgContract(null)} style={{marginTop:8,background:"rgba(248,113,113,.1)",color:"#f87171",borderRadius:8,padding:"4px 8px",fontSize:11,fontWeight:600}}>Usuń kontrakt</button>
-                </div>
-              ) : (
-                <div style={{fontSize:11,color:"#2a2a40",textAlign:"center",padding:"6px 0"}}>Brak skonfigurowanego kontraktu JDG</div>
-              )}
+                );
+              })()}
             </div>
 
             {/* Podsumowanie */}
@@ -1616,7 +1700,7 @@ export default function App() {
             <div style={{fontSize:isMobile?18:24,fontWeight:700,marginBottom:6}}>Kalendarz kontraktu JDG</div>
             <div style={{fontSize:isMobile?11:13,color:"#44445a",marginBottom:20}}>Śledzenie godzin względem kontraktu B2B</div>
 
-            {!jdgContract || !jdgContract.hoursPerMonth ? (
+            {!jdgContract || !jdgContract.totalHours ? (
               <div className="card" style={{padding:"40px 20px",textAlign:"center",color:"#44445a"}}>
                 <div style={{fontSize:40,marginBottom:12}}>📋</div>
                 <div style={{fontSize:16,fontWeight:600,marginBottom:8,color:"#eeeaf4"}}>Brak kontraktu JDG</div>
@@ -1628,28 +1712,37 @@ export default function App() {
             ) : (
               <>
                 {/* Contract summary */}
-                <div className="card" style={{padding:"16px",marginBottom:16}}>
-                  <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
-                    {[
-                      {label:"Godziny/mies.",val:`${jdgContract.hoursPerMonth} h`,cls:"blue"},
-                      {label:"Stawka",val:`${jdgContract.ratePerHour} ${jdgContract.currency}/h`,cls:"amber"},
-                      {label:"Mies. przychód",val:jdgContract.currency==="EUR"&&eurRate?`${(jdgContract.hoursPerMonth*jdgContract.ratePerHour).toFixed(0)} EUR`:fmt(jdgContract.hoursPerMonth*jdgContract.ratePerHour),cls:"green"},
-                      {label:jdgContract.currency==="EUR"&&eurRate?"W PLN (approx)":"Stawka waluta",val:jdgContract.currency==="EUR"&&eurRate?fmt(jdgContract.hoursPerMonth*jdgContract.ratePerHour*eurRate):jdgContract.currency,cls:"violet"},
-                    ].map((item,i)=>(
-                      <div key={i} style={{background:"rgba(0,0,0,.3)",borderRadius:12,padding:"12px 10px",textAlign:"center"}}>
-                        <div style={{fontSize:9,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:4}}>{item.label}</div>
-                        <div className={item.cls} style={{fontSize:isMobile?12:14,fontWeight:700}}>{item.val}</div>
+                {(()=>{
+                  const ri = getJdgRateInfo();
+                  if(!ri) return null;
+                  return (
+                    <div className="card" style={{padding:"16px",marginBottom:16}}>
+                      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
+                        {[
+                          {label:"Godziny/mies. (śr.)",val:`${ri.hoursPerMonth} h`,cls:"blue"},
+                          {label:"Stawka",val:`${ri.ratePerHour.toFixed(2)} ${jdgContract.currency}/h`,cls:"amber"},
+                          {label:"Łącznie godzin",val:`${jdgContract.totalHours} h`,cls:"violet"},
+                          {label:"Wartość kontraktu",val:jdgContract.currency==="EUR"&&eurRate?`${jdgContract.totalValue.toLocaleString("pl-PL")} EUR ≈ ${fmt(jdgContract.totalValue*eurRate)}`:fmt(jdgContract.totalValue),cls:"green"},
+                        ].map((item,i)=>(
+                          <div key={i} style={{background:"rgba(0,0,0,.3)",borderRadius:12,padding:"12px 10px",textAlign:"center"}}>
+                            <div style={{fontSize:9,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:4}}>{item.label}</div>
+                            <div className={item.cls} style={{fontSize:isMobile?11:13,fontWeight:700}}>{item.val}</div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                  {jdgContract.currency==="EUR" && (
-                    <div style={{marginTop:10,padding:"6px 10px",background:"rgba(251,191,36,.06)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
-                      {eurRate ? <span style={{fontSize:11,color:"#fbbf24"}}>Kurs NBP: 1 EUR = {eurRate.toFixed(4)} PLN ({eurRateDate})</span>
-                      : <span style={{fontSize:11,color:"#44445a"}}>Brak kursu EUR – pobierz poniżej</span>}
-                      <button onClick={fetchEurRate} style={{padding:"3px 8px",borderRadius:7,background:"rgba(251,191,36,.15)",color:"#fbbf24",fontSize:10,fontWeight:600}}>{eurRateLoading?"...":"↻ NBP"}</button>
+                      {jdgContract.currency==="EUR" && (
+                        <div style={{marginTop:10,padding:"6px 10px",background:"rgba(251,191,36,.06)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+                          {eurRate ? <span style={{fontSize:11,color:"#fbbf24"}}>Kurs NBP: 1 EUR = {eurRate.toFixed(4)} PLN ({eurRateDate})</span>
+                          : <span style={{fontSize:11,color:"#44445a"}}>Brak kursu EUR – pobierz poniżej</span>}
+                          <button onClick={fetchEurRate} style={{padding:"3px 8px",borderRadius:7,background:"rgba(251,191,36,.15)",color:"#fbbf24",fontSize:10,fontWeight:600}}>{eurRateLoading?"...":"↻ NBP"}</button>
+                        </div>
+                      )}
+                      <div style={{marginTop:10,fontSize:11,color:"#44445a"}}>
+                        Okres: <span style={{color:"#7dd3fc",fontWeight:600}}>{MONTHS_SHORT[jdgContract.periodStartMonth ?? 0]} {jdgContract.periodStartYear ?? now.getFullYear()} – {MONTHS_SHORT[jdgContract.periodEndMonth ?? 11]} {jdgContract.periodEndYear ?? now.getFullYear()}</span> ({ri.months} mies.)
+                      </div>
                     </div>
-                  )}
-                </div>
+                  );
+                })()}
 
                 {/* Year selector */}
                 <div style={{display:"flex",gap:6,marginBottom:16}}>
@@ -1659,39 +1752,50 @@ export default function App() {
                 {/* Monthly hours grid */}
                 <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10,marginBottom:20}}>
                   {Array.from({length:12},(_,m)=>{
+                    const ri = getJdgRateInfo();
+                    const contracted = ri ? ri.hoursPerMonth : 0;
                     const mk = monthKey(selYear,m);
                     const workedManual = jdgMonthlyHours[mk] || 0;
                     const workedEntries = getMonthEntries(selYear,m).filter(e=>e.category==="jdg_ryczalt"&&e.hoursWorked).reduce((s,e)=>s+(e.hoursWorked||0),0);
                     const worked = Math.max(workedManual,workedEntries);
-                    const contracted = jdgContract.hoursPerMonth;
                     const pct = contracted > 0 ? Math.min(100,(worked/contracted)*100) : 0;
                     const isCurMonth = m===now.getMonth()&&selYear===now.getFullYear();
                     const isDone = worked >= contracted && contracted > 0;
                     const isSelected = m === selMonth;
+                    // Check if month is in contract period
+                    const sYear = jdgContract.periodStartYear ?? now.getFullYear();
+                    const sMonth2 = jdgContract.periodStartMonth ?? 0;
+                    const eYear = jdgContract.periodEndYear ?? now.getFullYear();
+                    const eMonth = jdgContract.periodEndMonth ?? 11;
+                    const mk2 = monthKey(selYear,m);
+                    const inPeriod = mk2 >= monthKey(sYear,sMonth2) && mk2 <= monthKey(eYear,eMonth);
                     return (
                       <div key={m} onClick={()=>setSelMonth(m)} style={{
-                        background:isSelected?"rgba(125,211,252,.1)":isCurMonth?"rgba(125,211,252,.04)":"rgba(255,255,255,.03)",
-                        border:isSelected?"1px solid rgba(125,211,252,.4)":isCurMonth?"1px solid rgba(125,211,252,.2)":"1px solid rgba(255,255,255,.05)",
-                        borderRadius:14,padding:"12px 10px",cursor:"pointer",transition:"all .2s"
+                        background:isSelected?"rgba(125,211,252,.1)":isCurMonth?"rgba(125,211,252,.04)":inPeriod?"rgba(255,255,255,.03)":"rgba(255,255,255,.01)",
+                        border:isSelected?"1px solid rgba(125,211,252,.4)":isCurMonth?"1px solid rgba(125,211,252,.2)":inPeriod?"1px solid rgba(255,255,255,.05)":"1px solid rgba(255,255,255,.02)",
+                        borderRadius:14,padding:"12px 10px",cursor:"pointer",transition:"all .2s",opacity:inPeriod?1:0.4
                       }}>
                         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
                           <div style={{fontSize:12,fontWeight:700,color:isSelected?"#7dd3fc":isCurMonth?"#7dd3fc":"#eeeaf4"}}>{MONTHS_SHORT[m]}</div>
-                          <div style={{fontSize:12}}>{isDone?"✅":worked>0?"⏳":"·"}</div>
+                          <div style={{fontSize:12}}>{isDone?"✅":worked>0?"⏳":inPeriod?"·":"—"}</div>
                         </div>
-                        <div style={{height:4,background:"rgba(255,255,255,.06)",borderRadius:999,overflow:"hidden",marginBottom:5}}>
-                          <div style={{height:"100%",width:`${pct}%`,background:isDone?"linear-gradient(90deg,#4ade80,#22c55e)":worked>0?"linear-gradient(90deg,#7dd3fc,#38bdf8)":"transparent",borderRadius:999}}/>
-                        </div>
-                        <div style={{fontSize:10,color:"#44445a"}}>{worked} / {contracted} h</div>
-                        {isCurMonth && !isDone && worked > 0 && (()=>{
-                          const dayOfMonth = now.getDate();
-                          const dailyPace = worked / dayOfMonth;
-                          const remaining = contracted - worked;
-                          const daysNeeded = dailyPace > 0 ? Math.ceil(remaining / dailyPace) : null;
-                          if(!daysNeeded) return null;
-                          const cd = new Date(now); cd.setDate(now.getDate()+daysNeeded);
-                          const isThisMonth = cd.getMonth()===m && cd.getFullYear()===selYear;
-                          return <div style={{marginTop:4,fontSize:10,color:"#a78bfa",fontWeight:600}}>📅 {isThisMonth?`~${cd.getDate()} ${MONTHS_SHORT[m]}`:"nast. mies."}</div>;
-                        })()}
+                        {inPeriod && (
+                          <>
+                            <div style={{height:4,background:"rgba(255,255,255,.06)",borderRadius:999,overflow:"hidden",marginBottom:5}}>
+                              <div style={{height:"100%",width:`${pct}%`,background:isDone?"linear-gradient(90deg,#4ade80,#22c55e)":worked>0?"linear-gradient(90deg,#7dd3fc,#38bdf8)":"transparent",borderRadius:999}}/>
+                            </div>
+                            <div style={{fontSize:10,color:"#44445a"}}>{worked} / {contracted} h</div>
+                            {isCurMonth && !isDone && worked > 0 && (()=>{
+                              const dailyPace = worked / now.getDate();
+                              const remaining = contracted - worked;
+                              const daysNeeded = dailyPace > 0 ? Math.ceil(remaining / dailyPace) : null;
+                              if(!daysNeeded) return null;
+                              const cd = new Date(now); cd.setDate(now.getDate()+daysNeeded);
+                              const isThisMonth = cd.getMonth()===m && cd.getFullYear()===selYear;
+                              return <div style={{marginTop:4,fontSize:9,color:"#a78bfa",fontWeight:600}}>📅 ~{isThisMonth?`${cd.getDate()} ${MONTHS_SHORT[m]}`:"nast. mies."}</div>;
+                            })()}
+                          </>
+                        )}
                       </div>
                     );
                   })}
@@ -1699,18 +1803,19 @@ export default function App() {
 
                 {/* Selected month detail */}
                 {(()=>{
+                  const ri = getJdgRateInfo();
+                  if(!ri) return null;
+                  const contracted = ri.hoursPerMonth;
                   const mk = monthKey(selYear,selMonth);
                   const workedManual = jdgMonthlyHours[mk] !== undefined ? jdgMonthlyHours[mk] : 0;
                   const workedFromEntries = getMonthEntries(selYear,selMonth).filter(e=>e.category==="jdg_ryczalt"&&e.hoursWorked).reduce((s,e)=>s+(e.hoursWorked||0),0);
                   const worked = Math.max(workedManual,workedFromEntries);
-                  const contracted = jdgContract.hoursPerMonth;
                   const pct = contracted > 0 ? Math.min(100,(worked/contracted)*100) : 0;
                   const isCurrentMonth = selMonth===now.getMonth()&&selYear===now.getFullYear();
                   const remaining = Math.max(0,contracted-worked);
                   const dailyPace = isCurrentMonth && worked > 0 ? worked / now.getDate() : 0;
                   const daysNeeded = dailyPace > 0 ? Math.ceil(remaining/dailyPace) : null;
                   const completionDate = daysNeeded !== null ? new Date(now.getFullYear(),now.getMonth(),now.getDate()+daysNeeded) : null;
-                  const rateInPln = jdgContract.ratePerHour * (jdgContract.currency==="EUR"&&eurRate ? eurRate : 1);
                   return (
                     <div className="card" style={{padding:"20px"}}>
                       <div style={{fontSize:14,fontWeight:700,marginBottom:16,color:"#7dd3fc"}}>{MONTHS_FULL[selMonth]} {selYear} – szczegóły</div>
@@ -1745,7 +1850,7 @@ export default function App() {
                           <div style={{padding:"10px 12px",background:"rgba(74,222,128,.06)",borderRadius:10}}>
                             <div style={{fontSize:10,color:"#44445a",marginBottom:3}}>Zarobiono</div>
                             <div style={{fontSize:14,fontWeight:700,color:"#4ade80",fontFamily:"monospace"}}>
-                              {jdgContract.currency==="EUR"&&eurRate?`${(worked*jdgContract.ratePerHour).toFixed(0)} EUR ≈ ${fmt(worked*rateInPln)}`:fmt(worked*rateInPln)}
+                              {jdgContract.currency==="EUR"&&eurRate?`${(worked*ri.ratePerHour).toFixed(0)} EUR ≈ ${fmt(worked*ri.rateInPln)}`:fmt(worked*ri.rateInPln)}
                             </div>
                           </div>
                           <div style={{padding:"10px 12px",background:remaining>0?"rgba(255,255,255,.04)":"rgba(74,222,128,.06)",borderRadius:10}}>
@@ -1758,15 +1863,15 @@ export default function App() {
                       )}
                       {isCurrentMonth && worked===0 && (
                         <div style={{padding:"10px 12px",background:"rgba(255,255,255,.04)",borderRadius:10,fontSize:12,color:"#44445a",textAlign:"center",marginBottom:14}}>
-                          Brak godzin dla tego miesiąca – wpisz poniżej
+                          Brak godzin dla tego miesiąca – wpisz poniżej lub dodaj przychód JDG z godzinami
                         </div>
                       )}
                       {/* Manual hours input */}
                       <div style={{paddingTop:14,borderTop:"1px solid rgba(255,255,255,.06)"}}>
-                        <div style={{fontSize:12,color:"#44445a",marginBottom:8}}>Godziny dla {MONTHS_SHORT[selMonth]} {selYear}:</div>
+                        <div style={{fontSize:12,color:"#44445a",marginBottom:8}}>Ręczna korekta godzin dla {MONTHS_SHORT[selMonth]} {selYear}:</div>
                         <div className="input-box">
                           <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>h</span>
-                          <input type="number" inputMode="decimal" placeholder={`z ${contracted}`}
+                          <input type="number" inputMode="decimal" placeholder={`z ~${contracted}`}
                             value={jdgMonthlyHours[mk]!==undefined?String(jdgMonthlyHours[mk]):(workedFromEntries>0?String(workedFromEntries):"")}
                             onChange={e=>{
                               const v = parseFloat(String(e.target.value).replace(",","."));
@@ -1869,40 +1974,51 @@ export default function App() {
                 {/* JDG hours worked */}
                 {txForm.type==="income" && txForm.category==="jdg_ryczalt" && (
                   <div style={{marginBottom:14}}>
-                    <div style={{fontSize:12,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>Przepracowane godziny (opcj.)</div>
-                    {jdgContract && jdgContract.hoursPerMonth > 0 ? (
-                      <div>
-                        <div className="input-box" style={{marginBottom:4}}>
-                          <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>h</span>
-                          <input type="number" inputMode="decimal" placeholder={`z ${jdgContract.hoursPerMonth} h/mies.`}
-                            value={txForm.hoursWorked}
-                            onChange={e=>{
-                              const hw = e.target.value;
-                              setTxForm(f=>{
-                                const hwNum = parseFloat(String(hw).replace(",",".")) || 0;
-                                const rate = parseFloat(jdgContract.ratePerHour) || 0;
-                                let computedAmt = f.amount;
-                                if(hwNum > 0 && rate > 0) {
-                                  const rateInPln = jdgContract.currency === "EUR" && eurRate ? rate * eurRate : rate;
-                                  computedAmt = String(Math.round(hwNum * rateInPln * 100) / 100);
-                                }
-                                return {...f, hoursWorked: hw, amount: computedAmt};
-                              });
-                            }}
-                            style={{flex:1,fontSize:18,fontWeight:700,fontFamily:"monospace"}}/>
+                    <div style={{fontSize:12,color:"#44445a",textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>Sposób wprowadzenia dochodu JDG</div>
+                    <div style={{display:"flex",gap:8,marginBottom:10}}>
+                      <button onClick={()=>setTxForm(f=>({...f,jdgInputMode:"kwota",hoursWorked:""}))}
+                        style={{flex:1,padding:"10px 8px",borderRadius:10,background:txForm.jdgInputMode==="kwota"?"rgba(74,222,128,.15)":"rgba(255,255,255,.04)",color:txForm.jdgInputMode==="kwota"?"#4ade80":"#44445a",fontSize:12,fontWeight:600,border:txForm.jdgInputMode==="kwota"?"1px solid rgba(74,222,128,.3)":"1px solid rgba(255,255,255,.1)",cursor:"pointer"}}>
+                        💰 Podaj kwotę
+                      </button>
+                      <button onClick={()=>setTxForm(f=>({...f,jdgInputMode:"godziny",amount:""}))}
+                        style={{flex:1,padding:"10px 8px",borderRadius:10,background:txForm.jdgInputMode==="godziny"?"rgba(125,211,252,.15)":"rgba(255,255,255,.04)",color:txForm.jdgInputMode==="godziny"?"#7dd3fc":"#44445a",fontSize:12,fontWeight:600,border:txForm.jdgInputMode==="godziny"?"1px solid rgba(125,211,252,.3)":"1px solid rgba(255,255,255,.1)",cursor:"pointer"}}>
+                        ⏱ Podaj godziny
+                      </button>
+                    </div>
+                    {txForm.jdgInputMode==="godziny" && (()=>{
+                      const ri = getJdgRateInfo();
+                      if(!ri) return (
+                        <div style={{padding:"8px 12px",background:"rgba(255,255,255,.04)",borderRadius:10,fontSize:12,color:"#44445a"}}>
+                          Skonfiguruj kontrakt JDG w <button onClick={()=>{setModal(null);setTab("settings");}} style={{background:"none",color:"#7dd3fc",fontSize:12,cursor:"pointer",textDecoration:"underline"}}>Profilu</button>.
                         </div>
-                        {txForm.hoursWorked && parseFloat(txForm.hoursWorked) > 0 && (
-                          <div style={{fontSize:11,color:"#4ade80",textAlign:"right"}}>
-                            {parseFloat(txForm.hoursWorked)} / {jdgContract.hoursPerMonth} h
-                            {jdgContract.currency==="EUR" && eurRate && ` · ${jdgContract.ratePerHour} EUR/h → ${(jdgContract.ratePerHour * eurRate).toFixed(2)} PLN/h`}
+                      );
+                      const rateDisplay = jdgContract.currency==="EUR" && eurRate
+                        ? `${ri.ratePerHour.toFixed(2)} EUR/h ≈ ${ri.rateInPln.toFixed(2)} PLN/h`
+                        : `${ri.ratePerHour.toFixed(2)} PLN/h`;
+                      return (
+                        <div style={{background:"rgba(125,211,252,.05)",border:"1px solid rgba(125,211,252,.12)",borderRadius:12,padding:"12px"}}>
+                          <div style={{fontSize:11,color:"#7dd3fc",marginBottom:8}}>Stawka: <strong>{rateDisplay}</strong> · Śr. {ri.hoursPerMonth} h/mies.</div>
+                          <div className="input-box" style={{marginBottom:6}}>
+                            <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>h</span>
+                            <input type="number" inputMode="decimal" placeholder={`z ~${ri.hoursPerMonth}`}
+                              value={txForm.hoursWorked}
+                              onChange={e=>{
+                                const hw = e.target.value;
+                                const hwNum = parseFloat(String(hw).replace(",",".")) || 0;
+                                const computed = hwNum > 0 ? String(Math.round(hwNum * ri.rateInPln * 100) / 100) : "";
+                                setTxForm(f=>({...f, hoursWorked: hw, amount: computed}));
+                              }}
+                              style={{flex:1,fontSize:22,fontWeight:800,fontFamily:"monospace"}}/>
                           </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div style={{padding:"8px 12px",background:"rgba(255,255,255,.04)",borderRadius:10,fontSize:12,color:"#44445a"}}>
-                        Skonfiguruj kontrakt JDG w <button onClick={()=>{setModal(null);setTab("settings");}} style={{background:"none",color:"#7dd3fc",fontSize:12,cursor:"pointer",textDecoration:"underline"}}>Profilu</button>.
-                      </div>
-                    )}
+                          {txForm.hoursWorked && parseFloat(txForm.hoursWorked) > 0 && (
+                            <div style={{fontSize:11,color:"#4ade80",marginBottom:6}}>
+                              {parseFloat(txForm.hoursWorked)} h × {ri.rateInPln.toFixed(2)} PLN/h = <strong>{fmt(parseFloat(txForm.hoursWorked) * ri.rateInPln)}</strong>
+                            </div>
+                          )}
+                          <div style={{fontSize:10,color:"#555",marginBottom:4}}>Wyliczona kwota (możesz edytować):</div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
