@@ -1963,7 +1963,7 @@ export default function App() {
                         <button onClick={fetchEurRate} style={{padding:"4px 8px",borderRadius:8,background:"rgba(251,191,36,.15)",color:"#fbbf24",fontSize:11,fontWeight:600}}>{eurRateLoading?"...": "↻ Odśwież"}</button>
                       </div>
                     )}
-                    {txForm.currency==="EUR" && eurRate && txForm.amount && parseFloat(txForm.amount) > 0 && (
+                    {txForm.currency==="EUR" && eurRate && txForm.amount && parseFloat(txForm.amount) > 0 && txForm.jdgInputMode!=="godziny" && (
                       <div style={{marginTop:6,fontSize:12,color:"#7dd3fc",textAlign:"right"}}>
                         ≈ {fmt(parseFloat(String(txForm.amount).replace(",",".")) * eurRate)} PLN
                       </div>
@@ -2026,7 +2026,9 @@ export default function App() {
                   const ytd = computeYtdContext(txForm.year, txForm.month);
                   const cat = getCat("income", txForm.category);
                   const rawAmt = parseFloat(String(txForm.amount).replace(",","."));
-                  const amt = (txForm.currency === "EUR" && eurRate && rawAmt > 0) ? rawAmt * eurRate : rawAmt;
+                  // W trybie "godziny" amount jest już przeliczone na PLN (hours × rateInPln), nie przeliczaj drugi raz
+                  const amtAlreadyInPln = txForm.jdgInputMode === "godziny" && jdgContract?.currency === "EUR";
+                  const amt = (!amtAlreadyInPln && txForm.currency === "EUR" && eurRate && rawAmt > 0) ? rawAmt * eurRate : rawAmt;
                   if (!amt || amt <= 0) return null;
                   let r = null;
                   if (txForm.inputMode === "brutto") {
@@ -2087,7 +2089,7 @@ export default function App() {
                 })()}
 
                 <div className="input-box" style={{marginBottom:6}}>
-                  <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>{txForm.type==="income"&&txForm.currency==="EUR"?"EUR":"PLN"}</span>
+                  <span style={{fontSize:13,color:"#44445a",fontFamily:"monospace"}}>{txForm.type==="income"&&txForm.currency==="EUR"&&txForm.jdgInputMode!=="godziny"?"EUR":"PLN"}</span>
                   <input type="number" inputMode="decimal" placeholder="0,00" value={txForm.amount} onChange={e=>setTxForm(f=>({...f,amount:e.target.value}))} style={{flex:1,fontSize:isMobile?20:26,fontWeight:700,fontFamily:"monospace"}}/>
                 </div>
 
